@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlowBoard — Team Task Board</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ AUTH ============ -->
+<div class="auth-screen" id="authScreen">
+  <div class="auth-card">
+    <div class="brand big">Flow<span>Board</span></div>
+    <div class="auth-tabs">
+      <button type="button" class="active" id="tabLogin">Log in</button>
+      <button type="button" id="tabRegister">Create account</button>
+    </div>
+    <form id="authForm" autocomplete="off">
+      <label for="authUser">Username</label>
+      <input id="authUser" placeholder="e.g. padmini" autocomplete="username" required>
+      <label for="authPass">Password</label>
+      <input id="authPass" type="password" placeholder="At least 6 characters" autocomplete="current-password" required>
+      <div class="auth-error" id="authError"></div>
+      <button class="primary block" id="authSubmit" type="submit">Log in</button>
+    </form>
+    <p class="auth-hint">First account becomes the <b>admin</b>. Share this website URL with your team — they register, then you set their role.</p>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div class="app" id="app" hidden>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">Flow<span>Board</span></div>
+    <div class="workspace">WORKSPACE<b id="wsName">…</b></div>
+    <nav class="nav">
+      <button class="active" id="navBoard">▦ Task Board</button>
+      <button id="navSettings">⚙ Board Settings</button>
+      <button id="navLabels">⌗ Tags &amp; Fields</button>
+      <button id="navMembers" hidden>☺ Members</button>
+    </nav>
+    <div class="side-bottom">
+      <div id="whoami"></div>
+      <button class="linkbtn" id="logoutBtn" type="button">Log out</button>
+    </div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <button class="icon-btn menu-toggle" id="menuToggle" type="button" title="Menu">☰</button>
+      <div class="title" id="boardTitle">Task Board</div>
+      <div class="sprint" id="sprintPill">SPRINT <b id="sprintName"></b></div>
+      <button class="secondary" id="btnNewTask" type="button">+ Task</button>
+      <button class="primary" id="btnSprint" type="button">Start Sprint</button>
+    </header>
+
+    <div class="toolbar">
+      <div class="search"><input id="search" placeholder="Search tasks..."></div>
+      <select class="filter" id="fAssignee"><option value="">All assignees</option></select>
+      <select class="filter" id="fPriority"><option value="">All priorities</option></select>
+      <select class="filter" id="fDept"><option value="">All departments</option></select>
+      <select class="filter" id="fTag"><option value="">All tags</option></select>
+      <button class="secondary" id="btnClear" type="button">Clear</button>
+      <span class="view">Board view · <b id="total">0</b> tasks</span>
+    </div>
+
+    <section class="board"><div class="columns" id="columns"></div></section>
+  </main>
+</div>
+
+<!-- ============ TASK MODAL ============ -->
+<div class="modal-back" id="taskModal">
+  <div class="modal">
+    <h2 id="taskModalTitle">Add Task</h2>
+    <div class="form">
+      <div class="field full"><label>Task name *</label><input id="mTitle" placeholder="e.g. Complete release readiness validation"></div>
+      <div class="field"><label>Assignee</label><input id="mAssignee" list="assigneeList" placeholder="e.g. Padmini"><datalist id="assigneeList"></datalist></div>
+      <div class="field"><label>Department</label><select id="mDept"></select></div>
+      <div class="field"><label>Priority</label><select id="mPriority"></select></div>
+      <div class="field"><label>Due date</label><input id="mDue" type="date"></div>
+      <div class="field"><label>Task hours</label><select id="mHours"></select></div>
+      <div class="field"><label>&nbsp;</label><div class="tag-picker" id="mTags"></div></div>
+      <div class="field full" id="mCustomWrap"><label>Custom fields</label><div class="custom-grid" id="mCustom"></div></div>
+      <div class="field full"><label>Expected outcome</label><textarea id="mOutcome" placeholder="What should be achieved?"></textarea></div>
+      <div class="field full"><label>Acceptance criteria</label><textarea id="mAC" placeholder="Clear completion criteria"></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="danger" id="mDelete" type="button">Delete</button>
+      <span class="spacer"></span>
+      <button class="secondary" id="mCancel" type="button">Cancel</button>
+      <button class="primary" id="mSave" type="button">Save Task</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ COLUMN MODAL ============ -->
+<div class="modal-back" id="columnModal">
+  <div class="modal small">
+    <h2 id="colTitle">Add Column</h2>
+    <div class="form">
+      <div class="field full"><label>Column name *</label><input id="cName" placeholder="e.g. In Review"></div>
+      <div class="field"><label>Colour</label><input id="cColor" type="color" value="#8b7cff"></div>
+      <div class="field" id="cMoveWrap">
+        <label>Position</label>
+        <div class="row-btns">
+          <button class="secondary" id="cLeft" type="button">◀ Left</button>
+          <button class="secondary" id="cRight" type="button">Right ▶</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="danger" id="cDelete" type="button">Delete</button>
+      <span class="spacer"></span>
+      <button class="secondary" id="cCancel" type="button">Cancel</button>
+      <button class="primary" id="cSave" type="button">Save</button>
+    </div>
+    <div class="reassign-box" id="cReassign" hidden>
+      <p>This column has tasks. Move them to:</p>
+      <select id="cReassignTo"></select>
+      <button class="danger" id="cReassignGo" type="button">Move &amp; delete column</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SETTINGS MODAL ============ -->
+<div class="modal-back" id="settingsModal">
+  <div class="modal">
+    <h2>Board Settings</h2>
+    <div class="form">
+      <div class="field"><label>Workspace name</label><input id="sWorkspace"></div>
+      <div class="field"><label>Board title</label><input id="sBoard"></div>
+      <div class="field full"><label>Sprint label</label><input id="sSprint" placeholder="e.g. Sep 28 – Oct 2"></div>
+      <div class="field"><label>Sprint start</label><input id="sStart" type="date"></div>
+      <div class="field"><label>Sprint end</label><input id="sEnd" type="date"></div>
+      <div class="field full"><label>Departments</label><div class="list-editor" id="sDepts"></div>
+        <div class="add-row"><input id="sDeptNew" placeholder="Add department"><button class="secondary" id="sDeptAdd" type="button">Add</button></div>
+      </div>
+      <div class="field full"><label>Priorities</label><div class="list-editor" id="sPriorities"></div>
+        <div class="add-row"><input id="sPriNew" placeholder="Add priority"><button class="secondary" id="sPriAdd" type="button">Add</button></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="sCancel" type="button">Cancel</button>
+      <button class="primary" id="sSave" type="button">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TAGS & FIELDS MODAL ============ -->
+<div class="modal-back" id="labelsModal">
+  <div class="modal wide">
+    <h2>Tags &amp; Custom Fields</h2>
+    <div class="two-col">
+      <section>
+        <h3>Tags</h3>
+        <div class="list-editor" id="tagList"></div>
+        <div class="add-row">
+          <input id="tName" placeholder="Tag name">
+          <input id="tColor" type="color" value="#5f6471" class="color-in">
+          <button class="primary" id="tAdd" type="button">Add</button>
+        </div>
+      </section>
+      <section>
+        <h3>Custom fields</h3>
+        <div class="list-editor" id="fieldList"></div>
+        <div class="add-row stacked">
+          <div class="row-btns">
+            <input id="cfName" placeholder="Field name">
+            <select id="cfType">
+              <option value="text">Text</option>
+              <option value="number">Number</option>
+              <option value="date">Date</option>
+              <option value="select">Select</option>
+            </select>
+          </div>
+          <div class="row-btns" id="cfOptionsWrap" hidden>
+            <input id="cfOptions" placeholder="Options, comma separated (A, B, C)">
+          </div>
+          <button class="primary" id="cfAdd" type="button">Add field</button>
+        </div>
+      </section>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="lbClose" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MEMBERS MODAL ============ -->
+<div class="modal-back" id="membersModal">
+  <div class="modal">
+    <h2>Members</h2>
+    <p class="hint">Invite people by sharing this site URL — they register, then you set their role here.<br>
+      <b>Viewer</b> = read only · <b>Editor</b> = manage the board · <b>Admin</b> = manage members too.</p>
+    <div class="member-list" id="memList"></div>
+    <div class="modal-actions">
+      <button class="secondary" id="memClose" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
