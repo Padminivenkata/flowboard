@@ -40,6 +40,7 @@
     <nav class="nav">
       <button class="active" id="navBoard">▦ Task Board</button>
       <button id="navCalendar">◫ Sprint Calendar</button>
+      <button id="navReports">▤ Capacity &amp; Reports</button>
       <button id="navSettings">⚙ Board Settings</button>
       <button id="navLabels">⌗ Tags &amp; Fields</button>
       <button id="navMembers" hidden>☺ Members</button>
@@ -95,8 +96,18 @@
       <div class="field"><label>Assignee</label><input id="mAssignee" list="assigneeList" placeholder="e.g. Padmini"><datalist id="assigneeList"></datalist></div>
       <div class="field"><label>Department</label><select id="mDept"></select></div>
       <div class="field"><label>Priority</label><select id="mPriority"></select></div>
+      <div class="field"><label>Recurrence</label><select id="mRecur">
+        <option value="">None</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        <option value="quarterly">Quarterly</option>
+        <option value="half">6 months</option>
+        <option value="yearly">Yearly</option>
+      </select></div>
       <div class="field"><label>Due date</label><input id="mDue" type="date"></div>
       <div class="field"><label>Task hours</label><select id="mHours"></select></div>
+      <div class="field"><label>Logged time (h)</label><input id="mLogged" type="number" min="0" step="0.25" placeholder="0"></div>
       <div class="field"><label>&nbsp;</label><div class="tag-picker" id="mTags"></div></div>
       <div class="field full" id="mCustomWrap"><label>Custom fields</label><div class="custom-grid" id="mCustom"></div></div>
       <div class="field full"><label>Expected outcome</label><textarea id="mOutcome" placeholder="What should be achieved?"></textarea></div>
@@ -155,6 +166,7 @@
       <div class="field full"><label>Sprint label</label><input id="sSprint" placeholder="e.g. Sep 28 – Oct 2"></div>
       <div class="field"><label>Sprint start</label><input id="sStart" type="date"></div>
       <div class="field"><label>Sprint end</label><input id="sEnd" type="date"></div>
+      <div class="field"><label>Work hours / day</label><input id="sHrsDay" type="number" min="1" max="24" value="6"></div>
       <div class="field full"><label>Departments</label><div class="list-editor" id="sDepts"></div>
         <div class="add-row"><input id="sDeptNew" placeholder="Add department"><button class="secondary" id="sDeptAdd" type="button">Add</button></div>
       </div>
@@ -238,6 +250,50 @@
     <div class="cal-weeks" id="calWeeks"></div>
     <div class="modal-actions">
       <button class="secondary" id="calClose" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ CAPACITY & REPORTS MODAL ============ -->
+<div class="modal-back" id="reportsModal">
+  <div class="modal wide tall">
+    <h2>Capacity &amp; Reports
+      <span class="cal-range" id="repRange"></span>
+    </h2>
+    <p class="hint">Working days Mon–Fri. Each resource = work hours/day × working days (holidays auto-excluded). Department capacity = resources × that.</p>
+    <div class="rep-grid">
+      <section>
+        <h3>Department capacity &amp; utilisation <em class="sub">this week · buckets</em></h3>
+        <table class="rep-table" id="repDepts">
+          <thead><tr><th>Department</th><th>People</th><th>Capacity/wk</th><th>Workload</th><th>Avail</th><th>Util</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <h3>Assignee capacity &amp; utilisation</h3>
+        <table class="rep-table" id="repMembers">
+          <thead><tr><th>Member</th><th>Dept</th><th>Cap/wk</th><th>Workload</th><th>Avail</th><th>Util</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <h3>Recurring tasks</h3>
+        <div class="rep-recur" id="repRecur"></div>
+      </section>
+      <section>
+        <h3>Week-wise plan · available · utilisation</h3>
+        <div class="rep-scroll"><table class="rep-table" id="repWeeks">
+          <thead><tr><th>Week</th><th>Cap</th><th>Workload</th><th>Avail</th><th>Util</th><th>By column</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <h3>Sprint history &amp; velocity</h3>
+        <table class="rep-table" id="repSprints">
+          <thead><tr><th>Sprint</th><th>Planned</th><th>Actual</th><th>Velocity</th><th>Spilled</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <h3>Holidays <em class="sub">reduce capacity that week</em></h3>
+        <div class="list-editor" id="repHolidays"></div>
+        <div class="add-row"><input id="repHolidayNew" type="date"><button class="secondary" id="repHolidayAdd" type="button">Add</button></div>
+      </section>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="repClose" type="button">Close</button>
     </div>
   </div>
 </div>

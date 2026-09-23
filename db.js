@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'editor',
   capacity INTEGER NOT NULL DEFAULT 0,
+  department TEXT NOT NULL DEFAULT '',
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users (username COLLATE NOCASE);
@@ -51,6 +52,17 @@ CREATE TABLE IF NOT EXISTS task_moves (
 );
 CREATE INDEX IF NOT EXISTS idx_task_moves_task ON task_moves (task_id, at);
 
+CREATE TABLE IF NOT EXISTS sprint_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  start_date TEXT NOT NULL DEFAULT '',
+  end_date TEXT NOT NULL DEFAULT '',
+  planned_minutes REAL NOT NULL DEFAULT 0,
+  actual_minutes REAL NOT NULL DEFAULT 0,
+  spilled_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS tags (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -79,6 +91,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   tags TEXT NOT NULL DEFAULT '[]',
   custom_values TEXT NOT NULL DEFAULT '{}',
   position INTEGER NOT NULL DEFAULT 0,
+  recur TEXT NOT NULL DEFAULT '',
+  recur_history TEXT NOT NULL DEFAULT '[]',
+  logged_minutes INTEGER NOT NULL DEFAULT 0,
+  spilled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -88,8 +104,9 @@ CREATE INDEX IF NOT EXISTS idx_tasks_column ON tasks (column_id, position);
 const SEED_COLUMNS = [
   [1, 'Backlog', '#9ba0ae', 0, 'normal'],
   [2, 'To Do', '#8b7cff', 1, 'normal'],
-  [3, 'In Progress', '#f0a848', 2, 'start'],
-  [4, 'Done', '#3fb27f', 3, 'done'],
+  [3, 'Refinement', '#7ec8e3', 2, 'normal'],
+  [4, 'In Progress', '#f0a848', 3, 'start'],
+  [5, 'Done', '#3fb27f', 4, 'done'],
 ];
 
 const SEED_TASKS = [
@@ -112,10 +129,19 @@ export async function initDb() {
   if (!pcols.rows.some((r) => r.name === 'invite_code')) {
     await db.execute("ALTER TABLE settings ADD COLUMN invite_code TEXT NOT NULL DEFAULT ''");
   }
+  if (!pcols.rows.some((r) => r.name === 'holidays')) {
+    await db.execute("ALTER TABLE settings ADD COLUMN holidays TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!pcols.rows.some((r) => r.name === 'work_hours_per_day')) {
+    await db.execute("ALTER TABLE settings ADD COLUMN work_hours_per_day TEXT NOT NULL DEFAULT '6'");
+  }
 
   const ucols = await db.execute('PRAGMA table_info(users)');
   if (!ucols.rows.some((r) => r.name === 'capacity')) {
     await db.execute('ALTER TABLE users ADD COLUMN capacity INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!ucols.rows.some((r) => r.name === 'department')) {
+    await db.execute("ALTER TABLE users ADD COLUMN department TEXT NOT NULL DEFAULT ''");
   }
   const ccols = await db.execute('PRAGMA table_info(board_columns)');
   if (!ccols.rows.some((r) => r.name === 'stage')) {
@@ -124,6 +150,34 @@ export async function initDb() {
     if (inprog.rows[0]) await db.execute({ sql: "UPDATE board_columns SET stage = 'start' WHERE id = ?", args: [Number(inprog.rows[0].id)] });
     const done = await db.execute("SELECT id FROM board_columns WHERE lower(name) = 'done' LIMIT 1");
     if (done.rows[0]) await db.execute({ sql: "UPDATE board_columns SET stage = 'done' WHERE id = ?", args: [Number(done.rows[0].id)] });
+  }
+  const refchk = await db.execute("SELECT COUNT(*) c FROM board_columns WHERE lower(name) = 'refinement'");
+  if (Number(refchk.rows[0].c) === 0) {
+    const td = await db.execute("SELECT position FROM board_columns WHERE lower(name) = 'to do' LIMIT 1");
+    const ip = await db.execute("SELECT position FROM board_columns WHERE lower(name) = 'in progress' LIMIT 1");
+    if (td.rows[0] && ip.rows[0]) {
+      const tp = Number(td.rows[0].position);
+      const pp = Number(ip.rows[0].position);
+      await db.execute({ sql: 'UPDATE board_columns SET position = position + 1 WHERE position >= ?', args: [pp] });
+      await db.execute({
+        sql: 'INSERT INTO board_columns (name, color, position, stage) VALUES (?,?,?,?)',
+        args: ['Refinement', '#7ec8e3', Math.max(tp + 1, pp), 'normal'],
+      });
+    }
+  }
+
+  const tcols = await db.execute('PRAGMA table_info(tasks)');
+  if (!tcols.rows.some((r) => r.name === 'recur')) {
+    await db.execute("ALTER TABLE tasks ADD COLUMN recur TEXT NOT NULL DEFAULT ''");
+  }
+  if (!tcols.rows.some((r) => r.name === 'recur_history')) {
+    await db.execute("ALTER TABLE tasks ADD COLUMN recur_history TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!tcols.rows.some((r) => r.name === 'logged_minutes')) {
+    await db.execute('ALTER TABLE tasks ADD COLUMN logged_minutes INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!tcols.rows.some((r) => r.name === 'spilled')) {
+    await db.execute('ALTER TABLE tasks ADD COLUMN spilled INTEGER NOT NULL DEFAULT 0');
   }
 
   const settings = await db.execute('SELECT id FROM settings WHERE id = 1');

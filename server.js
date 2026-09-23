@@ -61,6 +61,45 @@ const numArr = (v) => Array.isArray(v) ? v.map(Number).filter(Number.isFinite) :
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
 const safeJson = (v, fallback) => { try { return JSON.parse(v); } catch { return fallback; } };
 
+function dateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function mondayOf(s) {
+  const d = s instanceof Date ? new Date(s) : new Date(String(s) + 'T00:00:00');
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d;
+}
+function addDays(d, n) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+function weekDates(monday, n) {
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(dateKey(addDays(monday, i)));
+  return out;
+}
+function holidaysInWeek(monday, holidays) {
+  const days = weekDates(monday, 7).filter((d) => new Date(d + 'T00:00:00').getDay() !== 0 && new Date(d + 'T00:00:00').getDay() !== 6);
+  return days.filter((d) => holidays.includes(d));
+}
+function nextRecurDate(due, recur) {
+  const d = new Date((due || dateKey(new Date())) + 'T00:00:00');
+  if (recur === 'daily') d.setDate(d.getDate() + 1);
+  else if (recur === 'weekly') d.setDate(d.getDate() + 7);
+  else if (recur === 'monthly') d.setMonth(d.getMonth() + 1);
+  else if (recur === 'quarterly') d.setMonth(d.getMonth() + 3);
+  else if (recur === 'half') d.setMonth(d.getMonth() + 6);
+  else if (recur === 'yearly') d.setFullYear(d.getFullYear() + 1);
+  else return due;
+  return dateKey(d);
+}
+const RECUR_LABELS = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', quarterly: 'Quarterly', '6mo': '6 months', yearly: 'Yearly' };
+
 function normTask(r) {
   return {
     id: Number(r.id),
@@ -75,6 +114,10 @@ function normTask(r) {
     acceptance: r.acceptance || '',
     tags: safeJson(r.tags, []),
     customValues: safeJson(r.custom_values, {}),
+    recur: r.recur || '',
+    recurHistory: safeJson(r.recur_history, []),
+    loggedMinutes: Number(r.logged_minutes) || 0,
+    spilled: Number(r.spilled) ? 1 : 0,
     position: Number(r.position),
   };
 }
@@ -134,6 +177,8 @@ async function getSettings() {
     departments: safeJson(s.departments, []),
     priorities: safeJson(s.priorities, []),
     invite_code: s.invite_code || '',
+    holidays: safeJson(s.holidays, []),
+    work_hours_per_day: Number(s.work_hours_per_day) || 6,
   };
 }
 
@@ -224,7 +269,7 @@ app.get('/api/board', auth, async (req, res, next) => {
       db.execute('SELECT * FROM tasks ORDER BY position, id'),
       db.execute('SELECT * FROM tags ORDER BY name COLLATE NOCASE'),
       db.execute('SELECT * FROM custom_fields ORDER BY position, id'),
-      db.execute('SELECT id, username, role, capacity FROM users ORDER BY username COLLATE NOCASE'),
+      db.execute('SELECT id, username, role, capacity, department FROM users ORDER BY username COLLATE NOCASE'),
       db.execute('SELECT * FROM task_moves ORDER BY at, id'),
     ]);
 
@@ -247,14 +292,14 @@ app.get('/api/board', auth, async (req, res, next) => {
       let startedAt = null;
       let doneAt = null;
       let cycleMinutes = null;
-      if (startCol && doneCol) {
+      if (startCol) {
         const started = moves.filter((ev) => ev.col === startCol.id)[0];
         startedAt = started ? started.at : null;
-        const done = startedAt != null
-          ? moves.filter((ev) => ev.col === doneCol.id && ev.at > startedAt)[0]
-          : null;
+      }
+      if (startCol && doneCol && startedAt != null) {
+        const done = moves.filter((ev) => ev.col === doneCol.id && ev.at > startedAt)[0];
         doneAt = done ? done.at : null;
-        if (startedAt != null && doneAt != null) cycleMinutes = Math.round((doneAt - startedAt) / 60);
+        if (doneAt != null) cycleMinutes = Math.round((doneAt - startedAt) / 60);
       }
       task.startedAt = startedAt;
       task.doneAt = doneAt;
@@ -265,6 +310,7 @@ app.get('/api/board', auth, async (req, res, next) => {
     const capacity = m.rows.map((u) => ({
       id: Number(u.id), username: u.username, role: u.role,
       capacity: Number(u.capacity) || 0,
+      department: u.department || '',
       workload: Math.round(tasks
         .filter((t) => t.assignee === u.username && (!doneCol || t.column_id !== doneCol.id))
         .reduce((s2, t) => s2 + hoursInt(t.hours), 0) * 10) / 10,
@@ -292,7 +338,7 @@ app.get('/api/board', auth, async (req, res, next) => {
         id: Number(r.id), name: r.name, type: r.type,
         options: safeJson(r.options, []), position: Number(r.position),
       })),
-      members: m.rows.map((r) => ({ id: Number(r.id), username: r.username, role: r.role, capacity: Number(r.capacity) || 0 })),
+      members: m.rows.map((r) => ({ id: Number(r.id), username: r.username, role: r.role, capacity: Number(r.capacity) || 0, department: r.department || '' })),
       capacity,
       stats,
     });
@@ -316,12 +362,14 @@ app.post('/api/tasks', auth, need('editor'), async (req, res, next) => {
     }
     const mx = await db.execute({ sql: 'SELECT COALESCE(MAX(position), -1) m FROM tasks WHERE column_id = ?', args: [colId] });
     const r = await db.execute({
-      sql: `INSERT INTO tasks (column_id, title, assignee, department, priority, due, hours, outcome, acceptance, tags, custom_values, position)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      sql: `INSERT INTO tasks (column_id, title, assignee, department, priority, due, hours, outcome, acceptance, tags, custom_values, position, recur, logged_minutes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [
         colId, title, str(b.assignee, 60), str(b.department, 60), str(b.priority, 20) || 'Medium',
         str(b.due, 20), str(b.hours, 10), str(b.outcome, 3000), str(b.acceptance, 3000),
         JSON.stringify(numArr(b.tags)), JSON.stringify(obj(b.customValues)), Number(mx.rows[0].m) + 1,
+        ['daily', 'weekly', 'monthly', 'quarterly', 'half', 'yearly'].includes(b.recur) ? b.recur : '',
+        Math.max(0, Math.min(600000, Math.round(Number(b.loggedMinutes) || 0))),
       ],
     });
     const newId = Number(r.lastInsertRowid);
@@ -358,6 +406,15 @@ app.patch('/api/tasks/:id', auth, need('editor'), async (req, res, next) => {
     if (b.tags !== undefined) put('tags', JSON.stringify(numArr(b.tags)));
     if (b.customValues !== undefined) put('custom_values', JSON.stringify(obj(b.customValues)));
 
+    if (b.recur !== undefined) {
+      const rec = ['daily', 'weekly', 'monthly', 'quarterly', 'half', 'yearly'].includes(b.recur) ? b.recur : '';
+      put('recur', rec);
+    }
+    if (b.loggedMinutes !== undefined) {
+      const mins = Math.max(0, Math.min(600000, Math.round(Number(b.loggedMinutes) || 0)));
+      put('logged_minutes', mins);
+    }
+
     if (sets.length) {
       await db.execute({ sql: `UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`, args: [...args, id] });
     }
@@ -389,6 +446,27 @@ app.patch('/api/tasks/:id', auth, need('editor'), async (req, res, next) => {
       for (const tid of ids) {
         await db.execute({ sql: 'UPDATE tasks SET position = ? WHERE id = ?', args: [i, tid] });
         i++;
+      }
+
+      if (task.recur) {
+        const dc = (await db.execute("SELECT id FROM board_columns WHERE stage='done' ORDER BY id LIMIT 1")).rows[0];
+        if (dc && Number(dc.id) === targetCol) {
+          const hist = safeJson(task.recur_history, []);
+          hist.push({ done: dateKey(new Date()) });
+          const next = nextRecurDate(task.due, task.recur);
+          const bl = (await db.execute('SELECT id FROM board_columns ORDER BY position, id LIMIT 1')).rows[0];
+          if (bl) {
+            await db.execute({
+              sql: "INSERT INTO task_moves (task_id, column_id, at) VALUES (?, ?, strftime('%s','now'))",
+              args: [id, Number(bl.id)],
+            });
+            await db.execute({
+              sql: "UPDATE tasks SET column_id = ?, due = ?, recur_history = ?, spilled = 0, updated_at = datetime('now') WHERE id = ?",
+              args: [Number(bl.id), next, JSON.stringify(hist), id],
+            });
+            await renumber(Number(bl.id));
+          }
+        }
       }
     } else if (sets.length) {
       await db.execute({ sql: "UPDATE tasks SET updated_at = datetime('now') WHERE id = ?", args: [id] });
@@ -580,6 +658,67 @@ app.delete('/api/custom-fields/:id', auth, need('editor'), async (req, res, next
 });
 
 // ---------- settings ----------
+async function finalizeSprint(st) {
+  const doneCol = (await db.execute("SELECT id FROM board_columns WHERE stage='done' ORDER BY id LIMIT 1")).rows[0];
+  const startCol = (await db.execute("SELECT id FROM board_columns WHERE stage='start' ORDER BY id LIMIT 1")).rows[0];
+  const backlog = (await db.execute('SELECT id FROM board_columns ORDER BY position, id LIMIT 1')).rows[0];
+  const doneId = doneCol ? Number(doneCol.id) : -1;
+  const startId = startCol ? Number(startCol.id) : -1;
+  const backlogId = backlog ? Number(backlog.id) : null;
+  const startSec = st.sprint_start ? Math.floor(new Date(st.sprint_start + 'T00:00:00Z').getTime() / 1000) : 0;
+  const endSec = st.sprint_end ? Math.floor(new Date(st.sprint_end + 'T00:00:00Z').getTime() / 1000) : Math.floor(Date.now() / 1000);
+
+  const tasks = (await db.execute('SELECT * FROM tasks')).rows;
+  const moves = (await db.execute('SELECT task_id, column_id, at FROM task_moves ORDER BY task_id, at')).rows;
+  const byTask = {};
+  for (const m of moves) (byTask[Number(m.task_id)] ||= []).push({ col: Number(m.column_id), at: Number(m.at) });
+
+  let planned = 0;
+  let actual = 0;
+  const unfinished = [];
+  for (const t of tasks) {
+    const nt = normTask(t);
+    planned += hoursInt(nt.hours) * 60;
+    const mv = byTask[nt.id] || [];
+    let startedAt = null;
+    let doneAt = null;
+    if (startId >= 0) {
+      const s = mv.find((m) => m.col === startId);
+      startedAt = s ? s.at : null;
+    }
+    if (doneId >= 0 && startedAt != null) {
+      const d = mv.find((m) => m.col === doneId && m.at > startedAt);
+      doneAt = d ? d.at : null;
+    }
+    if (doneId >= 0 && doneAt != null && doneAt >= startSec && doneAt <= endSec) {
+      if (startedAt != null) actual += (doneAt - startedAt);
+      actual += nt.loggedMinutes;
+    }
+    if (doneId >= 0 && nt.column_id !== doneId) {
+      unfinished.push(nt);
+      if (backlogId != null) {
+        await db.execute({
+          sql: "INSERT INTO task_moves (task_id, column_id, at) VALUES (?, ?, strftime('%s','now'))",
+          args: [nt.id, backlogId],
+        });
+      }
+    }
+  }
+
+  if (backlogId != null && doneId >= 0) {
+    await db.execute({
+      sql: "UPDATE tasks SET column_id = ?, spilled = 1, updated_at = datetime('now') WHERE column_id != ?",
+      args: [backlogId, doneId],
+    });
+    await renumber(backlogId);
+  }
+
+  await db.execute({
+    sql: 'INSERT INTO sprint_history (name, start_date, end_date, planned_minutes, actual_minutes, spilled_count) VALUES (?,?,?,?,?,?)',
+    args: [st.sprint_name || 'Sprint', st.sprint_start || '', st.sprint_end || '', planned, Math.round(actual), unfinished.length],
+  });
+}
+
 app.patch('/api/settings', auth, need('editor'), async (req, res, next) => {
   try {
     const b = req.body || {};
@@ -604,9 +743,23 @@ app.patch('/api/settings', auth, need('editor'), async (req, res, next) => {
         args.push(JSON.stringify(items));
       }
     }
+    if (b.holidays !== undefined) {
+      if (!Array.isArray(b.holidays)) return res.status(400).json({ error: 'holidays must be a list' });
+      const h = b.holidays.map((x) => str(x, 20)).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)).slice(0, 200);
+      sets.push('holidays = ?');
+      args.push(JSON.stringify(h));
+    }
+    if (b.work_hours_per_day !== undefined) {
+      const n = Math.max(1, Math.min(24, Math.round(Number(b.work_hours_per_day) || 6)));
+      sets.push('work_hours_per_day = ?');
+      args.push(String(n));
+    }
+    let before = null;
+    if (b.sprint_active !== undefined && b.sprint_active === false) before = await getSettings();
     if (sets.length) {
       await db.execute({ sql: `UPDATE settings SET ${sets.join(', ')} WHERE id = 1`, args });
     }
+    if (before && before.sprint_active) await finalizeSprint(before);
     bump();
     res.json({ settings: await getSettings() });
   } catch (e) { next(e); }
@@ -654,6 +807,154 @@ app.patch('/api/members/:id/capacity', auth, need('admin'), async (req, res, nex
     if (!r.rowsAffected) return res.status(404).json({ error: 'Member not found' });
     bump();
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.patch('/api/members/:id/department', auth, need('admin'), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const dep = str(req.body?.department, 60);
+    const r = await db.execute({ sql: 'UPDATE users SET department = ? WHERE id = ?', args: [dep, id] });
+    if (!r.rowsAffected) return res.status(404).json({ error: 'Member not found' });
+    bump();
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ---------- reports ----------
+app.get('/api/reports', auth, async (req, res, next) => {
+  try {
+    const st = await getSettings();
+    const members = (await db.execute('SELECT * FROM users ORDER BY username COLLATE NOCASE')).rows;
+    const columns = (await db.execute('SELECT * FROM board_columns ORDER BY position, id')).rows;
+    const tasks = (await db.execute('SELECT * FROM tasks')).rows.map(normTask);
+    const sprints = (await db.execute('SELECT * FROM sprint_history ORDER BY id DESC LIMIT 20')).rows;
+
+    const holidays = st.holidays || [];
+    const wh = st.work_hours_per_day || 6;
+    const workDays = 5;
+    const doneId = columns.find((c) => c.stage === 'done');
+    const doneColId = doneId ? Number(doneId.id) : -1;
+
+    const now = new Date();
+    const today = dateKey(now);
+    const thisMonday = mondayOf(today);
+    const weeks = [];
+    for (let w = -3; w <= 4; w++) {
+      const mon = addDays(thisMonday, w * 7);
+      const sun = addDays(mon, 6);
+      weeks.push({
+        key: dateKey(mon), start: dateKey(mon), end: dateKey(sun),
+        holidaysInWeek: holidaysInWeek(mon, holidays),
+      });
+    }
+
+    const memberCaps = new Map();
+    const deptResCount = new Map();
+    for (const m of members) {
+      const cap = Number(m.capacity) || 0;
+      const dep = (m.department || '').trim() || 'Unassigned';
+      memberCaps.set(m.username, { id: Number(m.id), dept: dep, cap });
+      deptResCount.set(dep, (deptResCount.get(dep) || 0) + 1);
+    }
+
+    const workloadBy = new Map();
+    for (const t of tasks) {
+      if (doneId && t.column_id === doneColId) continue;
+      if (t.assignee) workloadBy.set(t.assignee, (workloadBy.get(t.assignee) || 0) + hoursInt(t.hours));
+    }
+
+    const weeklyCapOf = (m, key) => {
+      const info = memberCaps.get(m.username);
+      const h = holidaysInWeek(mondayOf(key), holidays).length;
+      const days = Math.max(0, workDays - h);
+      const base = days * wh;
+      return info && info.cap > 0 ? info.cap : base;
+    };
+
+    const depts = new Map();
+    for (const m of members) {
+      const dep = (m.department || '').trim() || 'Unassigned';
+      if (!depts.has(dep)) depts.set(dep, { name: dep, resCount: 0, weeklyCap: 0, workload: 0 });
+      const d = depts.get(dep);
+      d.resCount++;
+      d.weeklyCap += weeklyCapOf(m, thisMonday);
+      d.workload += workloadBy.get(m.username) || 0;
+    }
+
+    const deptTable = [...depts.values()].map((d) => {
+      const avail = Math.max(0, d.weeklyCap - d.workload);
+      const util = d.weeklyCap > 0 ? Math.round((d.workload / d.weeklyCap) * 100) : 0;
+      const mult = d.weeklyCap > 0 ? d.weeklyCap / workDays : 0;
+      return {
+        ...d,
+        dailyCap: Math.round(mult * 10) / 10,
+        monthlyCap: Math.round(d.weeklyCap * 4.33 * 10) / 10,
+        quarterlyCap: Math.round(d.weeklyCap * 13 * 10) / 10,
+        halfCap: Math.round(d.weeklyCap * 26 * 10) / 10,
+        yearlyCap: Math.round(d.weeklyCap * 52 * 10) / 10,
+        available: Math.round(avail * 10) / 10,
+        utilization: util,
+        over: util > 100,
+      };
+    });
+
+    const memberTable = members.map((m) => {
+      const cap = weeklyCapOf(m, thisMonday);
+      const wl = workloadBy.get(m.username) || 0;
+      const avail = Math.max(0, cap - wl);
+      const util = cap > 0 ? Math.round((wl / cap) * 100) : 0;
+      return {
+        id: Number(m.id), username: m.username, role: m.role,
+        dept: (m.department || '').trim() || 'Unassigned',
+        capacity: cap, workload: Math.round(wl * 10) / 10,
+        available: Math.round(avail * 10) / 10, utilization: util,
+        over: util > 100, override: (Number(m.capacity) || 0) > 0,
+      };
+    });
+
+    const weekMatrix = weeks.map((w) => {
+      let weeklyCap = 0;
+      for (const m of members) weeklyCap += weeklyCapOf(m, w.key);
+      weeklyCap = Math.round(weeklyCap * 10) / 10;
+      const dueTasks = tasks.filter((t) => t.due && t.due >= w.start && t.due <= w.end);
+      const workload = Math.round(dueTasks.reduce((s, t) => s + hoursInt(t.hours), 0) * 10) / 10;
+      const colHours = {};
+      for (const t of dueTasks) {
+        const nm = columns.find((c) => Number(c.id) === t.column_id);
+        const nm2 = nm ? nm.name : 'Other';
+        colHours[nm2] = Math.round(((colHours[nm2] || 0) + hoursInt(t.hours)) * 10) / 10;
+      }
+      const available = Math.max(0, Math.round((weeklyCap - workload) * 10) / 10);
+      const utilization = weeklyCap > 0 ? Math.round((workload / weeklyCap) * 100) : 0;
+      return { ...w, weeklyCap, workload, available, utilization, colHours };
+    });
+
+    const recurringTasks = tasks
+      .filter((t) => t.recur && !(doneId && t.column_id === doneColId))
+      .map((t) => ({
+        id: t.id, title: t.title, assignee: t.assignee, recur: t.recur,
+        recurLabel: RECUR_LABELS[t.recur] || t.recur,
+        due: t.due, nextDue: nextRecurDate(t.due || today, t.recur),
+        completions: t.recurHistory.length,
+      }));
+
+    res.json({
+      settings: { holidays, work_hours_per_day: wh },
+      departments: deptTable,
+      members: memberTable,
+      weeks: weekMatrix,
+      sprints: sprints.map((s) => ({
+        id: Number(s.id), name: s.name, start: s.start_date, end: s.end_date,
+        plannedHours: Math.round((Number(s.planned_minutes) / 60) * 10) / 10,
+        actualHours: Math.round((Number(s.actual_minutes) / 60) * 10) / 10,
+        velocity: Number(s.planned_minutes) > 0
+          ? Math.round((Number(s.actual_minutes) / Number(s.planned_minutes)) * 100) : null,
+        spilled: Number(s.spilled_count),
+      })),
+      recurringTasks,
+      columns: columns.map((c) => ({ id: Number(c.id), name: c.name, stage: c.stage })),
+    });
   } catch (e) { next(e); }
 });
 

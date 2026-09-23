@@ -54,6 +54,16 @@ function hoursOf(t) {
   return Number.isFinite(n) ? n : 0;
 }
 function fmtFull(n) { return (Math.round(n * 10) / 10) + 'h'; }
+const RECURLABELS = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', quarterly: 'Quarterly', half: '6-mo', yearly: 'Yearly' };
+function fmtElapsed(startSec, nowSec) {
+  const mins = Math.floor(Math.max(0, nowSec - startSec) / 60);
+  if (mins < 60) return mins + 'm';
+  const h = mins / 60;
+  if (h < 24) return (Math.floor(h * 10) / 10) + 'h';
+  const d = Math.floor(h / 24);
+  const rh = Math.floor(h % 24);
+  return d + 'd ' + rh + 'h';
+}
 const PRIO_COLORS = { high: '#c44d45', medium: '#e8a548', low: '#3fb27f' };
 function prioColor(p) { return PRIO_COLORS[String(p || '').toLowerCase()] || '#9ba0ae'; }
 async function api(path, opts = {}) {
@@ -180,10 +190,16 @@ function cardHtml(t) {
   const edit = canEdit();
   const prio = (t.priority || '').toLowerCase();
   const prioClass = ['high', 'medium', 'low'].includes(prio) ? ' ' + prio : '';
-  let chips = `<span class="tag${prioClass}">${esc(t.priority || '—')}</span>`;
+  let chips = t.spilled ? '<span class="tag spilled-chip" title="Carried over from a previous sprint">SPILLED</span>' : '';
+  chips += `<span class="tag${prioClass}">${esc(t.priority || '—')}</span>`;
   if (t.department) chips += `<span class="tag">${esc(t.department)}</span>`;
   if (t.hours) chips += `<span class="tag">${esc(t.hours)}</span>`;
-  if (t.cycleMinutes != null) chips += `<span class="tag" title="Cycle time (In Progress → Done)">↺ ${fmtCycle(t.cycleMinutes)}</span>`;
+  if (t.recur) chips += `<span class="tag" title="Recurring · ${t.recurHistory.length} completed">↻ ${RECURLABELS[t.recur] || t.recur}</span>`;
+  const startCol = board.columns.find((c) => c.stage === 'start');
+  if (startCol && t.column_id === startCol.id && t.startedAt != null) {
+    chips += `<span class="tag timelive" data-live="${t.startedAt}" title="Elapsed in ${esc(startCol.name)}">⏱ ${fmtElapsed(t.startedAt, Date.now() / 1000)}</span>`;
+  }
+  if (t.cycleMinutes != null) chips += `<span class="tag" title="Cycle time">↺ ${fmtCycle(t.cycleMinutes)}</span>`;
   for (const tid of t.tags) {
     const g = board.tags.find((x) => x.id === tid);
     if (g) chips += `<span class="tag dot-tag" style="color:${esc(g.color)};background:${esc(g.color)}1a">${esc(g.name)}</span>`;
@@ -326,8 +342,21 @@ function fillTaskSelects(dept, prio) {
   $('mPriority').innerHTML = prios.length
     ? prios.map((p) => `<option${p === prio ? ' selected' : ''}>${esc(p)}</option>`).join('')
     : '<option value=""></option>';
-  const names = [...new Set([...board.members.map((m) => m.username), ...board.tasks.map((t) => t.assignee)].filter(Boolean))];
+  fillAssigneeList(dept);
+}
+
+function fillAssigneeList(dept) {
+  const memberDept = new Map(board.members.map((m) => [m.username, m.department || '']));
+  const names = [...new Set([
+    ...board.members.map((m) => m.username),
+    ...board.tasks.map((t) => t.assignee),
+  ].filter(Boolean))].filter((n) => {
+    const dep = memberDept.get(n);
+    if (dep === undefined || dep === '') return true;
+    return !dept || dep === dept;
+  });
   $('assigneeList').innerHTML = names.map((n) => `<option value="${esc(n)}">`).join('');
+  if ($('mAssignee').value && !names.includes($('mAssignee').value)) $('mAssignee').value = '';
 }
 
 function fieldInputHtml(f, val, disabled) {
@@ -373,6 +402,7 @@ function openTaskNew(colId) {
   targetColumnId = colId || board.columns[0].id;
   $('taskModalTitle').textContent = 'Add Task';
   $('mCycle').hidden = true;
+  delete $('mCycle').dataset.live;
   $('mDelete').hidden = true;
   $('mSave').hidden = false;
   $('mTitle').value = '';
@@ -380,6 +410,8 @@ function openTaskNew(colId) {
   $('mDue').value = '';
   $('mOutcome').value = '';
   $('mAC').value = '';
+  $('mRecur').value = '';
+  $('mLogged').value = '';
   const prio = board.settings.priorities[0] || 'Medium';
   const dept = board.settings.departments[0] || '';
   fillTaskSelects(dept, prio);
@@ -398,12 +430,26 @@ function openTaskView(id) {
   targetColumnId = t.column_id;
   $('taskModalTitle').textContent = 'Edit Task';
   const cyc = $('mCycle');
-  if (t.cycleMinutes != null) {
+  delete cyc.dataset.live;
+  const startCol = board.columns.find((c) => c.stage === 'start');
+  if (startCol && t.column_id === startCol.id && t.startedAt != null) {
+    cyc.hidden = false;
+    cyc.dataset.live = t.startedAt;
+    cyc.innerHTML = `⏱ Live — elapsed in ${esc(startCol.name)}: <b data-idx>${fmtElapsed(t.startedAt, Date.now() / 1000)}</b>`;
+  } else if (t.cycleMinutes != null) {
     cyc.hidden = false;
     cyc.innerHTML = `🔄 Cycle (In Progress → Done): <b>${fmtCycle(t.cycleMinutes)}</b>` +
-      (t.doneAt ? ` · finished ${new Date(t.doneAt * 1000).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '');
+      (t.doneAt ? ` · finished ${new Date(t.doneAt * 1000).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '') +
+      (t.loggedMinutes ? ` · logged ${fmtFull(t.loggedMinutes / 60)}` : '');
+  } else if (t.loggedMinutes) {
+    cyc.hidden = false;
+    cyc.innerHTML = `⏱ Logged time: <b>${fmtFull(t.loggedMinutes / 60)}</b>`;
   } else {
     cyc.hidden = true;
+  }
+  if (t.recur) {
+    cyc.hidden = false;
+    cyc.innerHTML += `<br>↻ Repeats ${RECURLABELS[t.recur] || t.recur} · next due ${t.due || '—'} · ${t.recurHistory.length} completed`;
   }
   const edit = canEdit();
   $('mDelete').hidden = !edit;
@@ -416,6 +462,8 @@ function openTaskView(id) {
   }
   $('mHours').value = t.hours || '0h';
   $('mDue').value = t.due;
+  $('mRecur').value = t.recur || '';
+  $('mLogged').value = t.loggedMinutes ? Math.round((t.loggedMinutes / 60) * 100) / 100 : '';
   $('mOutcome').value = t.outcome;
   $('mAC').value = t.acceptance;
   draftTags = new Set(t.tags);
@@ -444,6 +492,8 @@ async function saveTask() {
     priority: $('mPriority').value || 'Medium',
     due: $('mDue').value,
     hours: $('mHours').value,
+    recur: $('mRecur').value,
+    loggedMinutes: $('mLogged').value !== '' ? Math.max(0, Number($('mLogged').value) || 0) * 60 : undefined,
     outcome: $('mOutcome').value,
     acceptance: $('mAC').value,
     tags: [...draftTags],
@@ -602,6 +652,7 @@ function openSettings() {
   $('sSprint').value = s.sprint_name;
   $('sStart').value = s.sprint_start;
   $('sEnd').value = s.sprint_end;
+  $('sHrsDay').value = s.work_hours_per_day || 6;
   draftDepts = [...s.departments];
   draftPris = [...s.priorities];
   redrawSettingsLists = () => {
@@ -631,6 +682,7 @@ async function saveSettings() {
         sprint_name: $('sSprint').value.trim(),
         sprint_start: $('sStart').value,
         sprint_end: $('sEnd').value,
+        work_hours_per_day: Math.max(1, Math.min(24, Number($('sHrsDay').value) || 6)),
         departments: draftDepts,
         priorities: draftPris,
       },
@@ -747,7 +799,11 @@ function renderMembers() {
     return `<div class="member-row">
       <span class="avatar">${initials(m.username)}</span>
       <span class="grow">${esc(m.username)}${self ? ' (you)' : ''}</span>
-      <input type="number" class="cap-input" data-cap="${m.id}" value="${m.capacity || ''}" min="0" step="0.5" title="Capacity in hours per sprint">
+      <input type="number" class="cap-input" data-cap="${m.id}" value="${m.capacity || ''}" min="0" step="0.5" title="Capacity in hours per sprint (leave 0 for 30h/wk default)">
+      <select class="dept-input" data-dept="${m.id}" title="Department — used for dept-wise capacity & assignee list">
+        <option value="">No dept</option>
+        ${(board.settings.departments || []).map((d) => `<option${d === (m.department || '') ? ' selected' : ''}>${esc(d)}</option>`).join('')}
+      </select>
       <select data-id="${m.id}"${self ? ' disabled' : ''}>
         ${ROLES.map((r) => `<option${r === m.role ? ' selected' : ''}>${r}</option>`).join('')}
       </select>
@@ -790,6 +846,115 @@ function renderMembers() {
       }
     };
   });
+  $('memList').querySelectorAll('[data-dept]').forEach((sel) => {
+    sel.onchange = async () => {
+      try {
+        await api(`/api/members/${sel.dataset.dept}/department`, { method: 'PATCH', body: { department: sel.value } });
+        toast('Department updated');
+        await loadBoard();
+      } catch (e) { toast(e.message, true); }
+    };
+  });
+}
+
+/* ---------- capacity & reports ---------- */
+let holidayDraft = [];
+
+function openReports() {
+  $('sidebar').classList.remove('open');
+  loadReports().catch((e) => toast(e.message, true));
+}
+
+function optCls(u) { return u > 100 ? 'ov' : u >= 80 ? 'wk' : 'ok'; }
+function pctCell(u) {
+  const res = Math.min(100, u);
+  return `<div style="display:flex;align-items:center;gap:6px">
+    <span class="${optCls(u)}" style="min-width:38px;font-weight:650">${u}%</span>
+    <div class="cap-bar ${u > 100 ? 'over' : u >= 80 ? 'warn' : ''}" style="flex:1;margin-top:0"><i style="width:${res}%"></i></div>
+  </div>`;
+}
+function capPills(d) {
+  return `Wk ${fmtFull(d.weeklyCap)} · Day ${fmtFull(d.dailyCap)} · Mo ${fmtFull(d.monthlyCap)} · Qtr ${fmtFull(d.quarterlyCap)} · 6mo ${fmtFull(d.halfCap)} · Yr ${fmtFull(d.yearlyCap)}`;
+}
+
+async function loadReports() {
+  const r = await api('/api/reports');
+  $('repRange').textContent = `holidays: ${r.settings.holidays.length} · ${r.settings.work_hours_per_day}h/day default`;
+  $('repDepts').querySelector('tbody').innerHTML = r.departments.map((d) => `
+    <tr>
+      <td><b>${esc(d.name)}</b><br><span class="rm" style="color:var(--muted);font-size:11px">${capPills(d)}</span></td>
+      <td>${d.resCount}</td>
+      <td>${fmtFull(d.weeklyCap)}</td>
+      <td class="${optCls(d.utilization)}">${fmtFull(d.workload)}</td>
+      <td>${fmtFull(d.available)}</td>
+      <td>${pctCell(d.utilization)}</td>
+    </tr>`).join('') || '<tr><td colspan="6" style="color:var(--muted)">No team members yet — add them under ☺ Members and set their department</td></tr>';
+  $('repMembers').querySelector('tbody').innerHTML = r.members.map((m) => `
+    <tr>
+      <td><b>${esc(m.username)}</b>${m.override ? ' <span class="week-pill">custom cap</span>' : ''}</td>
+      <td>${esc(m.dept)}</td>
+      <td>${fmtFull(m.capacity)}</td>
+      <td class="${optCls(m.utilization)}">${fmtFull(m.workload)}</td>
+      <td>${fmtFull(m.available)}</td>
+      <td>${pctCell(m.utilization)}</td>
+    </tr>`).join('') || '<tr><td colspan="6" style="color:var(--muted)">No members</td></tr>';
+  const today = new Date();
+  $('repWeeks').querySelector('tbody').innerHTML = r.weeks.map((w) => {
+    const cur = today >= new Date(w.start + 'T00:00:00') && today <= new Date(w.end + 'T00:00:00');
+    const cols = Object.keys(w.colHours).map((n) => {
+      const col = r.columns.find((c) => c.name === n);
+      return `<span class="week-pill"${col ? ` style="background:${esc(col.color)}22"` : ''}>${esc(n)}: ${w.colHours[n]}</span>`;
+    }).join('');
+    return `<tr>
+      <td><b>${fmtWeekDay(new Date(w.start + 'T00:00:00'))} – ${fmtWeekDay(new Date(w.end + 'T00:00:00'))}</b>${cur ? ' <span class="week-pill" style="background:var(--purple);color:#fff">now</span>' : ''}
+        ${w.holidaysInWeek.length ? `<br><span class="rm" style="color:var(--muted);font-size:10.5px">holidays: ${w.holidaysInWeek.join(', ')}</span>` : ''}</td>
+      <td>${fmtFull(w.weeklyCap)}</td>
+      <td class="${optCls(w.utilization)}">${fmtFull(w.workload)}</td>
+      <td>${fmtFull(w.available)}</td>
+      <td>${pctCell(w.utilization)}</td>
+      <td>${cols || '—'}</td>
+    </tr>`;
+  }).join('');
+  $('repSprints').querySelector('tbody').innerHTML = r.sprints.map((s) => `
+    <tr>
+      <td><b>${esc(s.name)}</b><br><span class="rm" style="color:var(--muted);font-size:11px">${s.start || '—'} → ${s.end || 'now'}</span></td>
+      <td>${fmtFull(s.plannedHours)}</td>
+      <td>${fmtFull(s.actualHours)}</td>
+      <td class="${s.velocity == null ? '' : optCls(s.velocity)}">${s.velocity == null ? '—' : s.velocity + '%'}</td>
+      <td>${s.spilled}</td>
+    </tr>`).join('') || '<tr><td colspan="5" style="color:var(--muted)">No completed sprint yet — End the current sprint to record history &amp; velocity</td></tr>';
+  $('repRecur').innerHTML = r.recurringTasks.length
+    ? r.recurringTasks.map((t) => `<div class="rr">
+      <span><b>${esc(t.title)}</b><span class="rm"> · ${esc(t.assignee || 'unassigned')}</span></span>
+      <span class="rm">${esc(t.recurLabel)} · next ${t.nextDue} · done ${t.completions}×</span>
+    </div>`).join('')
+    : '<div style="color:var(--muted);font-size:12.5px">No recurring tasks — set a recurrence in task edit</div>';
+  holidayDraft = [...r.settings.holidays];
+  renderHolidays();
+  openModal('reportsModal');
+}
+
+function renderHolidays() {
+  const can = canEdit();
+  $('repHolidays').innerHTML = holidayDraft.length
+    ? holidayDraft.map((h, i) => `<div class="list-row"><span class="grow">${esc(h)}</span>${can ? `<button class="mini-del" type="button" data-i="${i}">×</button>` : ''}</div>`).join('')
+    : '<div class="list-row" style="color:#9aa0af">None — add holidays so capacity auto-adjusts that week</div>';
+  $('repHolidays').querySelectorAll('.mini-del').forEach((b) => {
+    b.onclick = async () => {
+      holidayDraft.splice(Number(b.dataset.i), 1);
+      renderHolidays();
+      await saveHolidays();
+    };
+  });
+  $('repHolidayAdd').style.display = can ? '' : 'none';
+  $('repHolidayNew').style.display = can ? '' : 'none';
+}
+
+async function saveHolidays() {
+  try {
+    await api('/api/settings', { method: 'PATCH', body: { holidays: holidayDraft } });
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
 }
 
 /* ---------- sprint calendar ---------- */
@@ -801,6 +966,9 @@ function mondayOf(d) {
   x.setHours(0, 0, 0, 0);
   x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
   return x;
+}
+function dayKey(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 function isoWeekNo(d) {
   const mon = mondayOf(d);
@@ -840,7 +1008,7 @@ function renderCalendar() {
   for (const t of board.tasks) {
     if (!t.due) { unscheduled.push(t); continue; }
     const mon = mondayOf(t.due);
-    const key = mon.toISOString().slice(0, 10);
+    const key = dayKey(mon);
     if (!grouped.has(key)) grouped.set(key, { mon, tasks: [] });
     grouped.get(key).tasks.push(t);
   }
@@ -965,6 +1133,18 @@ function bindEvents() {
   $('navMembers').onclick = openMembers;
   $('navCalendar').onclick = () => { $('sidebar').classList.remove('open'); openCalendar(); };
   $('calClose').onclick = () => closeModal('calendarModal');
+  $('navReports').onclick = openReports;
+  $('repClose').onclick = () => closeModal('reportsModal');
+  $('repHolidayAdd').onclick = async () => {
+    const v = $('repHolidayNew').value;
+    if (!v) { toast('Pick a date first', true); return; }
+    if (holidayDraft.includes(v)) { toast('Already added', true); return; }
+    holidayDraft.push(v);
+    $('repHolidayNew').value = '';
+    renderHolidays();
+    await saveHolidays();
+  };
+  $('mDept').onchange = () => fillAssigneeList($('mDept').value);
   $('btnNewTask').onclick = () => openTaskNew(null);
   $('btnSprint').onclick = toggleSprint;
   $('btnClear').onclick = () => {
@@ -1026,6 +1206,16 @@ function bindEvents() {
 async function init() {
   bindEvents();
   fillHours();
+  setInterval(() => {
+    document.querySelectorAll('.timelive').forEach((el) => {
+      el.textContent = '⏱ ' + fmtElapsed(Number(el.dataset.live), Date.now() / 1000);
+    });
+    const cycEl = $('mCycle');
+    if (cycEl && !cycEl.hidden && cycEl.dataset.live) {
+      const b = cycEl.querySelector('b[data-idx]');
+      if (b) b.textContent = fmtElapsed(Number(cycEl.dataset.live), Date.now() / 1000);
+    }
+  }, 1000);
   try {
     await loadBoard();
     await showApp();
