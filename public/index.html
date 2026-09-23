@@ -20,11 +20,15 @@
       <label for="authUser">Username</label>
       <input id="authUser" placeholder="e.g. padmini" autocomplete="username" required>
       <label for="authPass">Password</label>
-      <input id="authPass" type="password" placeholder="At least 6 characters" autocomplete="current-password" required>
+      <input id="authPass" type="password" placeholder="At least 8 characters, incl. a number" autocomplete="new-password" required>
+      <div id="authInviteWrap">
+        <label for="authInvite">Invite code <span id="inviteHint"></span></label>
+        <input id="authInvite" placeholder="Ask your admin if you're not the first user">
+      </div>
       <div class="auth-error" id="authError"></div>
       <button class="primary block" id="authSubmit" type="submit">Log in</button>
     </form>
-    <p class="auth-hint">First account becomes the <b>admin</b>. Share this website URL with your team — they register, then you set their role.</p>
+    <p class="auth-hint">The <b>first registered account</b> becomes the admin. After that, new members need an invite code set by the admin — share this website URL with your team.</p>
   </div>
 </div>
 
@@ -35,6 +39,7 @@
     <div class="workspace">WORKSPACE<b id="wsName">…</b></div>
     <nav class="nav">
       <button class="active" id="navBoard">▦ Task Board</button>
+      <button id="navCalendar">◫ Sprint Calendar</button>
       <button id="navSettings">⚙ Board Settings</button>
       <button id="navLabels">⌗ Tags &amp; Fields</button>
       <button id="navMembers" hidden>☺ Members</button>
@@ -64,6 +69,18 @@
       <span class="view">Board view · <b id="total">0</b> tasks</span>
     </div>
 
+    <div class="statbar" id="statbar" hidden>
+      <span class="stat" id="statCycle">Avg cycle (In Progress → Done): —</span>
+      <span class="stat" id="statDone">Done: 0</span>
+      <span class="stat" id="statOpen">Open: 0</span>
+      <span class="stat" id="statHours">Total hours: 0h</span>
+    </div>
+
+    <div class="capacity-wrap" id="capacityWrap" hidden>
+      <div class="capacity-head"><b>Team capacity &amp; workload</b><span class="cap-summary" id="capSummary"></span></div>
+      <div class="capacity-list" id="capacityList"></div>
+    </div>
+
     <section class="board"><div class="columns" id="columns"></div></section>
   </main>
 </div>
@@ -72,6 +89,7 @@
 <div class="modal-back" id="taskModal">
   <div class="modal">
     <h2 id="taskModalTitle">Add Task</h2>
+    <div class="cycle-line" id="mCycle" hidden></div>
     <div class="form">
       <div class="field full"><label>Task name *</label><input id="mTitle" placeholder="e.g. Complete release readiness validation"></div>
       <div class="field"><label>Assignee</label><input id="mAssignee" list="assigneeList" placeholder="e.g. Padmini"><datalist id="assigneeList"></datalist></div>
@@ -100,6 +118,11 @@
     <div class="form">
       <div class="field full"><label>Column name *</label><input id="cName" placeholder="e.g. In Review"></div>
       <div class="field"><label>Colour</label><input id="cColor" type="color" value="#8b7cff"></div>
+      <div class="field"><label>Stage (for cycle time)</label><select id="cStage">
+        <option value="normal">Normal</option>
+        <option value="start">Start — e.g. In Progress</option>
+        <option value="done">Done</option>
+      </select></div>
       <div class="field" id="cMoveWrap">
         <label>Position</label>
         <div class="row-btns">
@@ -190,11 +213,31 @@
 <div class="modal-back" id="membersModal">
   <div class="modal">
     <h2>Members</h2>
-    <p class="hint">Invite people by sharing this site URL — they register, then you set their role here.<br>
+    <p class="hint">Invite people by sharing this site URL — they register with the invite code below, then you set their role.<br>
       <b>Viewer</b> = read only · <b>Editor</b> = manage the board · <b>Admin</b> = manage members too.</p>
+    <div class="invite-box" id="inviteBox">
+      <span>Invite code: <b id="inviteCode">—</b></span>
+      <button class="secondary" id="inviteRegen" type="button">Generate new code</button>
+      <button class="secondary" id="inviteCopy" type="button">Copy</button>
+    </div>
     <div class="member-list" id="memList"></div>
+    <p class="hint">Capacity = team member&apos;s available <b>hours per sprint</b>. Workload is the sum of hours on their open tasks. Admins can set each member&apos;s capacity in the list above.</p>
     <div class="modal-actions">
       <button class="secondary" id="memClose" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SPRINT CALENDAR MODAL ============ -->
+<div class="modal-back" id="calendarModal">
+  <div class="modal wide">
+    <h2>Sprint Calendar — week-wise planning
+      <span class="cal-range" id="calRange"></span>
+    </h2>
+    <p class="hint">Tasks grouped by the week of their due date. Click any task to view / edit it.</p>
+    <div class="cal-weeks" id="calWeeks"></div>
+    <div class="modal-actions">
+      <button class="secondary" id="calClose" type="button">Close</button>
     </div>
   </div>
 </div>

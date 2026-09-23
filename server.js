@@ -16,6 +16,22 @@ const PORT = Number(process.env.PORT) || 3000;
 const ROLES = ['viewer', 'editor', 'admin'];
 const RANK = { viewer: 0, editor: 1, admin: 2 };
 
+const attempts = new Map();
+function throttle(key, limit = 10, windowMs = 15 * 60 * 1000) {
+  const now = Date.now();
+  const rec = attempts.get(key);
+  if (!rec || now > rec.resetAt) {
+    attempts.set(key, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+  rec.count += 1;
+  attempts.set(key, rec);
+  return rec.count > limit;
+}
+function validPassword(p) {
+  return p.length >= 8 && /[A-Za-z]/.test(p) && /\d/.test(p);
+}
+
 function resolveSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
   try {
@@ -117,6 +133,7 @@ async function getSettings() {
     sprint_active: Number(s.sprint_active) === 1,
     departments: safeJson(s.departments, []),
     priorities: safeJson(s.priorities, []),
+    invite_code: s.invite_code || '',
   };
 }
 
@@ -135,14 +152,27 @@ async function renumber(columnId) {
 // ---------- auth ----------
 app.post('/api/auth/register', async (req, res, next) => {
   try {
+    if (throttle('register:' + req.ip)) {
+      return res.status(429).json({ error: 'Too many attempts. Wait a few minutes and try again.' });
+    }
     const name = str(req.body?.username, 24).trim();
     const password = String(req.body?.password ?? '');
     if (name.length < 2) return res.status(400).json({ error: 'Username must be at least 2 characters' });
-    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!validPassword(password)) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters and include a letter and a number' });
+    }
     const exists = await db.execute({ sql: 'SELECT 1 FROM users WHERE username = ? COLLATE NOCASE', args: [name] });
     if (exists.rows.length) return res.status(400).json({ error: 'That username is already taken' });
     const count = await db.execute('SELECT COUNT(*) c FROM users');
-    const role = Number(count.rows[0].c) === 0 ? 'admin' : 'editor';
+    const isFirst = Number(count.rows[0].c) === 0;
+    const role = isFirst ? 'admin' : 'editor';
+    if (!isFirst) {
+      const st = await db.execute('SELECT invite_code FROM settings WHERE id = 1');
+      const code = (st.rows[0]?.invite_code || '').trim();
+      const given = str(req.body?.inviteCode, 40).trim();
+      if (!code) return res.status(400).json({ error: 'Registration is invite-only. Ask the admin to generate an invite code first.' });
+      if (given.toLowerCase() !== code.toLowerCase()) return res.status(400).json({ error: 'Invalid invite code. Ask your admin for the current code.' });
+    }
     const hash = await bcrypt.hash(password, 10);
     const r = await db.execute({
       sql: 'INSERT INTO users (username, password_hash, role) VALUES (?,?,?)',
@@ -156,6 +186,9 @@ app.post('/api/auth/register', async (req, res, next) => {
 
 app.post('/api/auth/login', async (req, res, next) => {
   try {
+    if (throttle('login:' + req.ip)) {
+      return res.status(429).json({ error: 'Too many attempts. Wait a few minutes and try again.' });
+    }
     const name = str(req.body?.username, 24).trim();
     const password = String(req.body?.password ?? '');
     const r = await db.execute({ sql: 'SELECT * FROM users WHERE username = ? COLLATE NOCASE', args: [name] });
@@ -163,6 +196,7 @@ app.post('/api/auth/login', async (req, res, next) => {
     if (!u || !(await bcrypt.compare(password, u.password_hash))) {
       return res.status(400).json({ error: 'Wrong username or password' });
     }
+    attempts.delete('login:' + req.ip);
     const user = { id: Number(u.id), username: u.username, role: u.role };
     setToken(req, res, user.id);
     res.json({ user });
@@ -177,30 +211,90 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/me', auth, (req, res) => res.json({ user: req.user }));
 
 // ---------- board ----------
+const hoursInt = (h) => {
+  const n = parseFloat(String(h || '').replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+};
+
 app.get('/api/board', auth, async (req, res, next) => {
   try {
-    const [s, c, t, g, f, m] = await Promise.all([
+    const [s, c, t, g, f, m, mv] = await Promise.all([
       getSettings(),
       db.execute('SELECT * FROM board_columns ORDER BY position, id'),
       db.execute('SELECT * FROM tasks ORDER BY position, id'),
       db.execute('SELECT * FROM tags ORDER BY name COLLATE NOCASE'),
       db.execute('SELECT * FROM custom_fields ORDER BY position, id'),
-      db.execute('SELECT id, username, role FROM users ORDER BY username COLLATE NOCASE'),
+      db.execute('SELECT id, username, role, capacity FROM users ORDER BY username COLLATE NOCASE'),
+      db.execute('SELECT * FROM task_moves ORDER BY at, id'),
     ]);
+
+    const columns = c.rows.map((r) => ({
+      id: Number(r.id), name: r.name, color: r.color,
+      position: Number(r.position), stage: r.stage || 'normal',
+    }));
+    const startCol = columns.find((x) => x.stage === 'start');
+    const doneCol = columns.find((x) => x.stage === 'done');
+
+    const movesByTask = {};
+    for (const r of mv.rows) {
+      const tid = Number(r.task_id);
+      (movesByTask[tid] ||= []).push({ col: Number(r.column_id), at: Number(r.at) });
+    }
+
+    const tasks = t.rows.map((r) => {
+      const task = normTask(r);
+      const moves = movesByTask[task.id] || [];
+      let startedAt = null;
+      let doneAt = null;
+      let cycleMinutes = null;
+      if (startCol && doneCol) {
+        const started = moves.filter((ev) => ev.col === startCol.id)[0];
+        startedAt = started ? started.at : null;
+        const done = startedAt != null
+          ? moves.filter((ev) => ev.col === doneCol.id && ev.at > startedAt)[0]
+          : null;
+        doneAt = done ? done.at : null;
+        if (startedAt != null && doneAt != null) cycleMinutes = Math.round((doneAt - startedAt) / 60);
+      }
+      task.startedAt = startedAt;
+      task.doneAt = doneAt;
+      task.cycleMinutes = cycleMinutes;
+      return task;
+    });
+
+    const capacity = m.rows.map((u) => ({
+      id: Number(u.id), username: u.username, role: u.role,
+      capacity: Number(u.capacity) || 0,
+      workload: Math.round(tasks
+        .filter((t) => t.assignee === u.username && (!doneCol || t.column_id !== doneCol.id))
+        .reduce((s2, t) => s2 + hoursInt(t.hours), 0) * 10) / 10,
+    }));
+
+    const cycles = tasks.filter((t) => t.cycleMinutes != null).map((t) => t.cycleMinutes);
+    const stats = {
+      avgCycleMinutes: cycles.length ? Math.round(cycles.reduce((a, b2) => a + b2, 0) / cycles.length) : null,
+      doneCount: doneCol ? tasks.filter((t) => t.column_id === doneCol.id).length : 0,
+      openCount: doneCol ? tasks.filter((t) => t.column_id !== doneCol.id).length : tasks.length,
+      totalHours: Math.round(tasks.reduce((s2, t) => s2 + hoursInt(t.hours), 0) * 10) / 10,
+      cycleCount: cycles.length,
+    };
+
     res.json({
       me: req.user,
       settings: s || {
         workspace_name: 'APPX Delivery', board_name: 'Task Board', sprint_name: '',
         sprint_start: '', sprint_end: '', sprint_active: false, departments: [], priorities: [],
       },
-      columns: c.rows.map((r) => ({ id: Number(r.id), name: r.name, color: r.color, position: Number(r.position) })),
-      tasks: t.rows.map(normTask),
+      columns,
+      tasks,
       tags: g.rows.map((r) => ({ id: Number(r.id), name: r.name, color: r.color })),
       customFields: f.rows.map((r) => ({
         id: Number(r.id), name: r.name, type: r.type,
         options: safeJson(r.options, []), position: Number(r.position),
       })),
-      members: m.rows.map((r) => ({ id: Number(r.id), username: r.username, role: r.role })),
+      members: m.rows.map((r) => ({ id: Number(r.id), username: r.username, role: r.role, capacity: Number(r.capacity) || 0 })),
+      capacity,
+      stats,
     });
   } catch (e) { next(e); }
 });
@@ -230,7 +324,9 @@ app.post('/api/tasks', auth, need('editor'), async (req, res, next) => {
         JSON.stringify(numArr(b.tags)), JSON.stringify(obj(b.customValues)), Number(mx.rows[0].m) + 1,
       ],
     });
-    const row = await db.execute({ sql: 'SELECT * FROM tasks WHERE id = ?', args: [Number(r.lastInsertRowid)] });
+    const newId = Number(r.lastInsertRowid);
+    await db.execute({ sql: "INSERT INTO task_moves (task_id, column_id, at) VALUES (?, ?, strftime('%s','now'))", args: [newId, colId] });
+    const row = await db.execute({ sql: 'SELECT * FROM tasks WHERE id = ?', args: [newId] });
     bump();
     res.status(201).json(normTask(row.rows[0]));
   } catch (e) { next(e); }
@@ -288,6 +384,7 @@ app.patch('/api/tasks/:id', auth, need('editor'), async (req, res, next) => {
       }
       ids.splice(idx, 0, id);
       await db.execute({ sql: "UPDATE tasks SET column_id = ?, updated_at = datetime('now') WHERE id = ?", args: [targetCol, id] });
+      await db.execute({ sql: "INSERT INTO task_moves (task_id, column_id, at) VALUES (?, ?, strftime('%s','now'))", args: [id, targetCol] });
       let i = 0;
       for (const tid of ids) {
         await db.execute({ sql: 'UPDATE tasks SET position = ? WHERE id = ?', args: [i, tid] });
@@ -314,18 +411,27 @@ app.delete('/api/tasks/:id', auth, need('editor'), async (req, res, next) => {
 });
 
 // ---------- columns ----------
+async function clearColumnStage(stage, exceptId = null) {
+  await db.execute({
+    sql: 'UPDATE board_columns SET stage = ? WHERE stage = ? AND (? IS NULL OR id != ?)',
+    args: ['normal', stage, exceptId == null ? null : exceptId, exceptId == null ? null : exceptId],
+  });
+}
+
 app.post('/api/board-columns', auth, need('editor'), async (req, res, next) => {
   try {
     const name = str(req.body?.name, 40).trim();
     if (!name) return res.status(400).json({ error: 'Column name is required' });
     const color = str(req.body?.color, 20) || '#9ba0ae';
+    const stage = ['start', 'done'].includes(req.body?.stage) ? req.body.stage : 'normal';
+    if (stage !== 'normal') await clearColumnStage(stage);
     const mx = await db.execute('SELECT COALESCE(MAX(position), -1) m FROM board_columns');
     const r = await db.execute({
-      sql: 'INSERT INTO board_columns (name, color, position) VALUES (?,?,?)',
-      args: [name, color, Number(mx.rows[0].m) + 1],
+      sql: 'INSERT INTO board_columns (name, color, position, stage) VALUES (?,?,?,?)',
+      args: [name, color, Number(mx.rows[0].m) + 1, stage],
     });
     bump();
-    res.status(201).json({ id: Number(r.lastInsertRowid), name, color });
+    res.status(201).json({ id: Number(r.lastInsertRowid), name, color, stage });
   } catch (e) { next(e); }
 });
 
@@ -345,6 +451,12 @@ app.patch('/api/board-columns/:id', auth, need('editor'), async (req, res, next)
     if (req.body?.color !== undefined) {
       sets.push('color = ?');
       args.push(str(req.body.color, 20) || '#9ba0ae');
+    }
+    if (req.body?.stage !== undefined) {
+      const stage = ['start', 'done'].includes(req.body.stage) ? req.body.stage : 'normal';
+      if (stage !== 'normal') await clearColumnStage(stage, id);
+      sets.push('stage = ?');
+      args.push(stage);
     }
     if (sets.length) {
       await db.execute({ sql: `UPDATE board_columns SET ${sets.join(', ')} WHERE id = ?`, args: [...args, id] });
@@ -380,6 +492,7 @@ app.delete('/api/board-columns/:id', auth, need('editor'), async (req, res, next
       if (to === id) return res.status(400).json({ error: 'Pick a different column' });
       const tchk = await db.execute({ sql: 'SELECT 1 FROM board_columns WHERE id = ?', args: [to] });
       if (!tchk.rows.length) return res.status(400).json({ error: 'Target column not found' });
+      await db.execute({ sql: "INSERT INTO task_moves (task_id, column_id, at) SELECT id, ?, strftime('%s','now') FROM tasks WHERE column_id = ?", args: [to, id] });
       await db.execute({ sql: 'UPDATE tasks SET column_id = ? WHERE column_id = ?', args: [to, id] });
       await renumber(to);
     } else if (Number(total.rows[0].c) <= 1) {
@@ -500,6 +613,15 @@ app.patch('/api/settings', auth, need('editor'), async (req, res, next) => {
 });
 
 // ---------- members (admin) ----------
+app.post('/api/settings/invite-code', auth, need('admin'), async (req, res, next) => {
+  try {
+    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    await db.execute({ sql: 'UPDATE settings SET invite_code = ? WHERE id = 1', args: [code] });
+    bump();
+    res.json({ inviteCode: code });
+  } catch (e) { next(e); }
+});
+
 app.patch('/api/members/:id/role', auth, need('admin'), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -518,6 +640,17 @@ app.delete('/api/members/:id', auth, need('admin'), async (req, res, next) => {
     const id = Number(req.params.id);
     if (id === req.user.id) return res.status(400).json({ error: 'You cannot remove yourself' });
     const r = await db.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [id] });
+    if (!r.rowsAffected) return res.status(404).json({ error: 'Member not found' });
+    bump();
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.patch('/api/members/:id/capacity', auth, need('admin'), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const cap = Math.max(0, Math.min(1000, Math.round(Number(req.body?.capacity) || 0)));
+    const r = await db.execute({ sql: 'UPDATE users SET capacity = ? WHERE id = ?', args: [cap, id] });
     if (!r.rowsAffected) return res.status(404).json({ error: 'Member not found' });
     bump();
     res.json({ ok: true });

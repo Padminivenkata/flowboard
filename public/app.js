@@ -40,6 +40,22 @@ function toast(msg, isErr) {
   clearTimeout(window.__tt);
   window.__tt = setTimeout(() => { t.style.display = 'none'; }, 2200);
 }
+function fmtCycle(min) {
+  if (min == null) return '—';
+  if (min < 60) return Math.round(min) + 'm';
+  const h = min / 60;
+  if (h < 24) return (Math.round(h * 10) / 10) + 'h';
+  const d = Math.floor(h / 24);
+  const rh = Math.round(h % 24);
+  return d + 'd ' + rh + 'h';
+}
+function hoursOf(t) {
+  const n = parseFloat(String(t.hours || '').replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+function fmtFull(n) { return (Math.round(n * 10) / 10) + 'h'; }
+const PRIO_COLORS = { high: '#c44d45', medium: '#e8a548', low: '#3fb27f' };
+function prioColor(p) { return PRIO_COLORS[String(p || '').toLowerCase()] || '#9ba0ae'; }
 async function api(path, opts = {}) {
   const { method = 'GET', body } = opts;
   const res = await fetch(path, {
@@ -76,8 +92,45 @@ function renderAll() {
   $('navLabels').hidden = !canEdit();
   $('navMembers').hidden = !isAdmin();
   fillFilters();
+  renderStats();
+  renderCapacity();
   renderColumns();
   if ($('membersModal').classList.contains('show')) renderMembers();
+  if ($('calendarModal').classList.contains('show')) renderCalendar();
+}
+
+function renderStats() {
+  const st = board.stats;
+  $('statbar').hidden = !st;
+  if (!st) return;
+  $('statCycle').innerHTML = `Avg cycle (In Progress → Done): <span>${fmtCycle(st.avgCycleMinutes)}</span> <em>(${st.cycleCount} done)</em>`;
+  $('statDone').innerHTML = `Done: <span>${st.doneCount}</span>`;
+  $('statOpen').innerHTML = `Open: <span>${st.openCount}</span>`;
+  $('statHours').innerHTML = `Total hours: <span>${fmtFull(st.totalHours)}</span>`;
+}
+
+function renderCapacity() {
+  const caps = board.capacity || [];
+  const hasData = caps.some((c) => c.capacity > 0 || c.workload > 0);
+  $('capacityWrap').hidden = !hasData;
+  if (!hasData) return;
+  const totCap = caps.reduce((s, c) => s + c.capacity, 0);
+  const totLoad = caps.reduce((s, c) => s + c.workload, 0);
+  $('capSummary').textContent = `${fmtFull(totLoad)} of ${totCap || 'no'} hrs capacity assigned`;
+  $('capacityList').innerHTML = caps.map((c) => {
+    const pct = c.capacity > 0 ? Math.round((c.workload / c.capacity) * 100) : 0;
+    const cls = c.capacity > 0 ? (pct >= 100 ? 'over' : pct >= 80 ? 'warn' : 'ok') : 'na';
+    const barW = c.capacity > 0 ? Math.min(100, pct) : 0;
+    const score = c.capacity > 0 ? `${pct}%` : '—';
+    return `<div class="cap-item">
+      <div class="cap-top">
+        <span class="cap-user"><span class="avatar">${initials(c.username)}</span> ${esc(c.username)}</span>
+        <span class="cap-h">${fmtFull(c.workload)} / ${c.capacity ? fmtFull(c.capacity) : '—'}</span>
+      </div>
+      <div class="cap-bar${cls === 'na' ? ' na' : ''}"><i style="width:${barW}%"></i></div>
+      <div class="cap-top" style="margin-top:4px"><span class="cap-score ${cls}">${score === '—' ? 'capacity not set' : score + ' utilized'}</span></div>
+    </div>`;
+  }).join('');
 }
 
 function fillSelect(sel, values, current, allLabel) {
@@ -130,6 +183,7 @@ function cardHtml(t) {
   let chips = `<span class="tag${prioClass}">${esc(t.priority || '—')}</span>`;
   if (t.department) chips += `<span class="tag">${esc(t.department)}</span>`;
   if (t.hours) chips += `<span class="tag">${esc(t.hours)}</span>`;
+  if (t.cycleMinutes != null) chips += `<span class="tag" title="Cycle time (In Progress → Done)">↺ ${fmtCycle(t.cycleMinutes)}</span>`;
   for (const tid of t.tags) {
     const g = board.tags.find((x) => x.id === tid);
     if (g) chips += `<span class="tag dot-tag" style="color:${esc(g.color)};background:${esc(g.color)}1a">${esc(g.name)}</span>`;
@@ -165,6 +219,8 @@ function renderColumns() {
       <div class="col-head">
         <span class="dot" style="background:${esc(col.color)}"></span>
         <span class="col-name">${esc(col.name)}</span>
+        ${col.stage === 'start' ? `<span class="stage-mark" title="Start column — cycle time starts here" style="color:${esc(col.color)}">▶</span>` : ''}
+        ${col.stage === 'done' ? `<span class="stage-mark" title="Done column — cycle time ends here" style="color:${esc(col.color)}">●</span>` : ''}
         <span class="count">${arr.length}</span>
         ${edit ? `<button class="col-edit" data-act="col-menu" data-col="${col.id}" title="Column options">⋯</button>` : ''}
       </div>
@@ -316,6 +372,7 @@ function openTaskNew(colId) {
   editingTaskId = null;
   targetColumnId = colId || board.columns[0].id;
   $('taskModalTitle').textContent = 'Add Task';
+  $('mCycle').hidden = true;
   $('mDelete').hidden = true;
   $('mSave').hidden = false;
   $('mTitle').value = '';
@@ -340,6 +397,14 @@ function openTaskView(id) {
   editingTaskId = id;
   targetColumnId = t.column_id;
   $('taskModalTitle').textContent = 'Edit Task';
+  const cyc = $('mCycle');
+  if (t.cycleMinutes != null) {
+    cyc.hidden = false;
+    cyc.innerHTML = `🔄 Cycle (In Progress → Done): <b>${fmtCycle(t.cycleMinutes)}</b>` +
+      (t.doneAt ? ` · finished ${new Date(t.doneAt * 1000).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '');
+  } else {
+    cyc.hidden = true;
+  }
   const edit = canEdit();
   $('mDelete').hidden = !edit;
   $('mSave').hidden = !edit;
@@ -420,6 +485,7 @@ function openColumnNew() {
   $('colTitle').textContent = 'Add Column';
   $('cName').value = '';
   $('cColor').value = '#8b7cff';
+  $('cStage').value = 'normal';
   $('cDelete').hidden = true;
   $('cMoveWrap').hidden = true;
   $('cReassign').hidden = true;
@@ -435,6 +501,7 @@ function openColumnEdit(id) {
   $('colTitle').textContent = 'Edit Column';
   $('cName').value = col.name;
   $('cColor').value = /^#[0-9a-fA-F]{6}$/.test(col.color) ? col.color : '#8b7cff';
+  $('cStage').value = ['start', 'done'].includes(col.stage) ? col.stage : 'normal';
   $('cDelete').hidden = false;
   $('cMoveWrap').hidden = false;
   $('cReassign').hidden = true;
@@ -446,9 +513,9 @@ async function saveColumn() {
   if (!name) { toast('Column name is required', true); return; }
   try {
     if (editingColumnId != null) {
-      await api(`/api/board-columns/${editingColumnId}`, { method: 'PATCH', body: { name, color: $('cColor').value } });
+      await api(`/api/board-columns/${editingColumnId}`, { method: 'PATCH', body: { name, color: $('cColor').value, stage: $('cStage').value } });
     } else {
-      await api('/api/board-columns', { method: 'POST', body: { name, color: $('cColor').value } });
+      await api('/api/board-columns', { method: 'POST', body: { name, color: $('cColor').value, stage: $('cStage').value } });
     }
     closeModal('columnModal');
     toast('Column saved');
@@ -648,8 +715,30 @@ async function addField() {
 /* ---------- members modal ---------- */
 function openMembers() {
   if (!isAdmin()) return;
+  renderInvite();
   renderMembers();
   openModal('membersModal');
+}
+
+function renderInvite() {
+  $('inviteCode').textContent = board.settings.invite_code || '(not set)';
+}
+
+async function regenInvite() {
+  try {
+    const d = await api('/api/settings/invite-code', { method: 'POST' });
+    $('inviteCode').textContent = d.inviteCode;
+    toast('New invite code generated');
+    await loadBoard();
+    renderInvite();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function copyInvite() {
+  const code = $('inviteCode').textContent;
+  if (!code || code === '(not set)') { toast('Generate a code first', true); return; }
+  try { await navigator.clipboard.writeText(code); toast('Invite code copied'); }
+  catch { toast('Could not copy — select the code manually', true); }
 }
 
 function renderMembers() {
@@ -658,6 +747,7 @@ function renderMembers() {
     return `<div class="member-row">
       <span class="avatar">${initials(m.username)}</span>
       <span class="grow">${esc(m.username)}${self ? ' (you)' : ''}</span>
+      <input type="number" class="cap-input" data-cap="${m.id}" value="${m.capacity || ''}" min="0" step="0.5" title="Capacity in hours per sprint">
       <select data-id="${m.id}"${self ? ' disabled' : ''}>
         ${ROLES.map((r) => `<option${r === m.role ? ' selected' : ''}>${r}</option>`).join('')}
       </select>
@@ -685,6 +775,110 @@ function renderMembers() {
         toast('Member removed');
         await loadBoard();
       } catch (e) { toast(e.message, true); }
+    };
+  });
+  $('memList').querySelectorAll('[data-cap]').forEach((inp) => {
+    inp.onchange = async () => {
+      const cap = Math.max(0, Number(inp.value) || 0);
+      try {
+        await api(`/api/members/${inp.dataset.cap}/capacity`, { method: 'PATCH', body: { capacity: cap } });
+        toast('Capacity updated');
+        await loadBoard();
+      } catch (e) {
+        toast(e.message, true);
+        await loadBoard().catch(() => {});
+      }
+    };
+  });
+}
+
+/* ---------- sprint calendar ---------- */
+function fmtWeekDay(d) {
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+}
+function mondayOf(d) {
+  const x = d instanceof Date ? new Date(d) : new Date(String(d) + 'T00:00:00');
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+function isoWeekNo(d) {
+  const mon = mondayOf(d);
+  const thur = new Date(mon);
+  thur.setDate(thur.getDate() + 3);
+  const jan1 = new Date(thur.getFullYear(), 0, 1);
+  return Math.ceil((((thur - jan1) / 86400000) + jan1.getDay() + 1) / 7);
+}
+
+function openCalendar() {
+  renderCalendar();
+  openModal('calendarModal');
+}
+
+function calTaskHtml(t, idx) {
+  const doneId = board.columns.some((c) => c.stage === 'done')
+    ? board.columns.find((c) => c.stage === 'done').id : -1;
+  const done = t.column_id === doneId;
+  return `<div class="cal-task" data-id="${t.id}">
+    <span class="idx">${idx}</span>
+    <span class="tinfo"><b>${esc(t.title)}${done ? '<span class="cal-inside">done</span>' : ''}</b>
+      <span class="tmeta">
+        <span class="dot" style="background:${esc(prioColor(t.priority))}"></span>
+        ${t.assignee ? `${esc(t.assignee)}` : ''}
+        ${t.due ? fmtWeekDay(new Date(t.due + 'T00:00:00')) : ''}
+        ${t.hours ? `<span class="tag">${esc(t.hours)}</span>` : ''}
+        ${t.cycleMinutes != null ? `<span class="tag">↺ ${fmtCycle(t.cycleMinutes)}</span>` : ''}
+      </span>
+    </span>
+  </div>`;
+}
+
+function renderCalendar() {
+  const todayMonday = mondayOf(new Date());
+  const grouped = new Map();
+  const unscheduled = [];
+  for (const t of board.tasks) {
+    if (!t.due) { unscheduled.push(t); continue; }
+    const mon = mondayOf(t.due);
+    const key = mon.toISOString().slice(0, 10);
+    if (!grouped.has(key)) grouped.set(key, { mon, tasks: [] });
+    grouped.get(key).tasks.push(t);
+  }
+  const weeks = [...grouped.values()].sort((a, b) => a.mon - b.mon);
+
+  const curr = new Date();
+  $('calRange').textContent = 'Today: ' + curr.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+
+  let html = weeks.map((w) => {
+    const sun = new Date(w.mon);
+    sun.setDate(sun.getDate() + 6);
+    const cur = w.mon.getTime() === todayMonday.getTime();
+    const hrs = Math.round(w.tasks.reduce((s, t) => s + hoursOf(t), 0) * 10) / 10;
+    const tasks = [...w.tasks].sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
+    return `<div class="cal-week${cur ? ' cal-current' : ''}">
+      <div class="cal-week-head">
+        <span>${fmtWeekDay(w.mon)} – ${fmtWeekDay(sun)}</span>
+        <span class="cal-w">W${isoWeekNo(w.mon)}</span>
+        <span class="cal-h">${fmtFull(hrs)}</span>
+      </div>
+      ${tasks.map((t, i) => calTaskHtml(t, i + 1)).join('')}
+    </div>`;
+  }).join('');
+
+  if (unscheduled.length) {
+    const hrs = Math.round(unscheduled.reduce((s, t) => s + hoursOf(t), 0) * 10) / 10;
+    html += `<div class="cal-week">
+      <div class="cal-week-head"><span>Unscheduled</span><span class="cal-h">${fmtFull(hrs)}</span></div>
+      ${unscheduled.map((t, i) => calTaskHtml(t, '•')).join('')}
+    </div>`;
+  }
+
+  if (!html) html = '<div class="cal-empty">No tasks yet — add tasks with a due date to plan week-wise.</div>';
+  $('calWeeks').innerHTML = html;
+  $('calWeeks').querySelectorAll('.cal-task').forEach((el) => {
+    el.onclick = () => {
+      closeModal('calendarModal');
+      openTaskView(Number(el.dataset.id));
     };
   });
 }
@@ -730,6 +924,8 @@ function setAuthMode(mode) {
   $('tabRegister').classList.toggle('active', mode === 'register');
   $('authSubmit').textContent = mode === 'login' ? 'Log in' : 'Create account';
   $('authPass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('authInviteWrap').style.display = mode === 'register' ? '' : 'none';
+  $('inviteHint').textContent = mode === 'register' ? '(required for new members)' : '';
   $('authError').textContent = '';
 }
 
@@ -738,10 +934,9 @@ async function handleAuth(e) {
   $('authError').textContent = '';
   try {
     const path = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
-    const d = await api(path, {
-      method: 'POST',
-      body: { username: $('authUser').value, password: $('authPass').value },
-    });
+    const body = { username: $('authUser').value, password: $('authPass').value };
+    if (path.endsWith('register')) body.inviteCode = $('authInvite').value.trim();
+    const d = await api(path, { method: 'POST', body });
     $('authPass').value = '';
     toast(`Welcome, ${d.user.username}`);
     await loadBoard();
@@ -758,6 +953,7 @@ async function logout() {
 
 /* ---------- init ---------- */
 function bindEvents() {
+  setAuthMode('login');
   $('tabLogin').onclick = () => setAuthMode('login');
   $('tabRegister').onclick = () => setAuthMode('register');
   $('authForm').onsubmit = handleAuth;
@@ -767,6 +963,8 @@ function bindEvents() {
   $('navSettings').onclick = openSettings;
   $('navLabels').onclick = openLabels;
   $('navMembers').onclick = openMembers;
+  $('navCalendar').onclick = () => { $('sidebar').classList.remove('open'); openCalendar(); };
+  $('calClose').onclick = () => closeModal('calendarModal');
   $('btnNewTask').onclick = () => openTaskNew(null);
   $('btnSprint').onclick = toggleSprint;
   $('btnClear').onclick = () => {
@@ -812,6 +1010,8 @@ function bindEvents() {
   $('cfAdd').onclick = addField;
   $('lbClose').onclick = () => closeModal('labelsModal');
   $('memClose').onclick = () => closeModal('membersModal');
+  $('inviteRegen').onclick = regenInvite;
+  $('inviteCopy').onclick = copyInvite;
 
   document.querySelectorAll('.modal-back').forEach((back) => {
     back.addEventListener('mousedown', (e) => { if (e.target === back) back.classList.remove('show'); });

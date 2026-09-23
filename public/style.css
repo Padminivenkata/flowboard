@@ -40,6 +40,9 @@ button:disabled,input:disabled,select:disabled,textarea:disabled{opacity:.55;cur
 #authForm input{width:100%;padding:10px 11px;border:1px solid var(--line2);border-radius:8px;margin-bottom:13px;outline:none}
 #authForm input:focus{border-color:var(--purple)}
 .auth-error{color:var(--danger);font-size:12px;min-height:16px;margin-bottom:8px}
+#authInviteWrap label span{font-weight:400;color:#9aa0af;font-style:italic}
+.invite-box{display:flex;align-items:center;gap:8px;background:var(--purple-soft);border:1px solid var(--purple-border);border-radius:9px;padding:10px 12px;margin-bottom:14px;font-size:13px;flex-wrap:wrap}
+.invite-box b{color:var(--purple-ink);letter-spacing:.06em;font-size:14px}
 .auth-hint{font-size:11.5px;color:var(--muted);line-height:1.55;margin:16px 0 0;text-align:center}
 
 /* ============ layout ============ */
@@ -167,3 +170,48 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
   .form,.two-col,.custom-grid{grid-template-columns:1fr}
   .column{width:270px}
 }
+
+/* ---------- stats + capacity ---------- */
+.statbar{display:flex;gap:22px;padding:10px 18px 0;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.statbar .stat b{color:var(--ink)}
+.statbar .stat span{padding:2px 8px;border-radius:10px;background:var(--col-bg);color:var(--ink);font-weight:650}
+.capacity-wrap{margin:12px 18px 0;border:1px solid var(--card-line);border-radius:12px;background:#fff;padding:12px 14px}
+.capacity-head{display:flex;align-items:center;gap:10px;font-size:13px;margin-bottom:10px}
+.capacity-head .cap-summary{color:var(--muted);font-size:12px}
+.capacity-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.cap-item{border:1px solid var(--card-line);border-radius:10px;padding:9px 10px}
+.cap-item .cap-top{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;align-items:center}
+.cap-item .cap-top .cap-user{font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cap-item .cap-top .cap-h{color:var(--muted)}
+.cap-bar{height:7px;background:var(--col-bg);border-radius:6px;margin-top:7px;overflow:hidden}
+.cap-bar i{display:block;height:100%;border-radius:6px;background:var(--purple)}
+.cap-bar.over i{background:var(--danger)}
+.cap-bar.warn i{background:#e8a548}
+.cap-score{font-weight:700}
+.cap-score.over{color:var(--danger)}
+.cap-score.warn{color:#b57a13}
+.cap-score.ok{color:var(--purple)}
+
+.cap-input{width:74px;padding:6px 8px;border:1px solid var(--line2);border-radius:8px;text-align:right}
+
+/* ---------- cycle line ---------- */
+.cycle-line{border:1px solid var(--purple-border);background:var(--purple-soft);color:var(--purple-ink);border-radius:10px;padding:8px 10px;font-size:12.5px;margin-top:10px}
+.cycle-line b{color:var(--purple-ink)}
+
+/* ---------- sprint calendar ---------- */
+.cal-range{font-size:12px;color:var(--muted);font-weight:500}
+.cal-weeks{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;max-height:62vh;overflow:auto;padding:2px}
+.cal-week{border:1px solid var(--card-line);border-radius:12px;background:#fff;overflow:hidden}
+.cal-week.cal-current{border-color:var(--purple);box-shadow:0 0 0 1px var(--purple)}
+.cal-week-head{background:var(--col-bg);padding:8px 12px;font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+.cal-week-head .cal-w{color:var(--muted);font-weight:600;font-size:11.5px}
+.cal-week-head .cal-h{font-size:12px;color:var(--muted)}
+.cal-task{display:flex;gap:8px;padding:8px 12px;border-top:1px solid var(--line);font-size:13px;cursor:pointer;align-items:flex-start}
+.cal-task:hover{background:var(--purple-soft)}
+.cal-task .idx{color:var(--muted);min-width:16px}
+.cal-task .tinfo{flex:1;min-width:0}
+.cal-task .tinfo b{display:block;font-size:13px;line-height:1.35}
+.cal-task .tmeta{font-size:11.5px;color:var(--muted);margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.cal-task .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
+.cal-empty{color:var(--muted);font-size:12px;padding:8px 12px;border-top:1px solid var(--line)}
+.cal-inside{display:inline-block;background:var(--purple-soft);color:var(--purple-ink);font-size:10.5px;font-weight:650;border-radius:8px;padding:1px 7px;margin-left:6px;vertical-align:middle}
