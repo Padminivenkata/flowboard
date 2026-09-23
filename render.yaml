@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: flowboard
+    runtime: node
+    plan: free
+    healthCheckPath: /
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
