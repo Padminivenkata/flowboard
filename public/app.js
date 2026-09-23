@@ -186,6 +186,9 @@ function filteredTasks() {
     (!tg || t.tags.includes(Number(tg))));
 }
 
+let backlogMode = false;
+const leftmostCol = () => board.columns.slice().sort((a, b) => a.position - b.position)[0];
+
 function cardHtml(t) {
   const edit = canEdit();
   const prio = (t.priority || '').toLowerCase();
@@ -213,6 +216,7 @@ function cardHtml(t) {
       shown++;
     }
   }
+  const inBacklog = backlogMode && edit && leftmostCol() && t.column_id === leftmostCol().id;
   return `<div class="card" data-id="${t.id}" ${edit ? 'draggable="true"' : ''}>
     <div class="task-title">${esc(t.title)}</div>
     <div class="meta">${chips}</div>
@@ -220,6 +224,7 @@ function cardHtml(t) {
       <span class="avatar">${initials(t.assignee)}</span>
       <span>${esc(t.assignee || 'Unassigned')}</span>
       <span class="due">${esc(fmtDue(t.due))}</span>
+      ${inBacklog ? `<button class="sprint-btn" data-act="to-sprint" type="button">→ Sprint</button>` : ''}
     </div>
   </div>`;
 }
@@ -229,6 +234,22 @@ function renderColumns() {
   const list = filteredTasks();
   $('total').textContent = list.length;
   const edit = canEdit();
+  if (backlogMode) {
+    const blk = leftmostCol();
+    const arr = list.filter((t) => t.column_id === blk.id);
+    $('columns').innerHTML = `<div class="backlog-bar">SPRINT BACKLOG — tasks waiting to be planned · <b>→ Sprint</b> on a card (or ⤴ Sprint on the column) moves it into the current sprint. Create tasks here with the ＋ button — full options, including recurrence, apply.</div>
+      <div class="column" data-col="${blk.id}">
+        <div class="col-head">
+          <span class="dot" style="background:${esc(blk.color)}"></span>
+          <span class="col-name">${esc(blk.name)}</span>
+          <span class="count">${arr.length}</span>
+          ${edit ? `<button class="col-edit" data-act="sprint-all" title="Move all to current sprint">⤴ Sprint</button>` : ''}
+        </div>
+        <div class="cards">${arr.length ? arr.map(cardHtml).join('') : '<div class="empty">Drop tasks here</div>'}</div>
+        ${edit ? `<button class="add" data-act="add-card" data-col="${blk.id}">＋ Add task</button>` : ''}
+      </div>`;
+    return;
+  }
   let html = board.columns.map((col) => {
     const arr = list.filter((t) => t.column_id === col.id);
     return `<div class="column" data-col="${col.id}">
@@ -302,6 +323,8 @@ function bindBoard() {
     const act = e.target.closest('[data-act]');
     if (act) {
       const kind = act.dataset.act;
+      if (kind === 'to-sprint') { e.stopPropagation(); moveToSprint(Number(act.closest('.card').dataset.id)); return; }
+      if (kind === 'sprint-all') { moveAllToSprint(); return; }
       if (kind === 'add-card') return openTaskNew(Number(act.dataset.col));
       if (kind === 'col-menu') return openColumnEdit(Number(act.dataset.col));
       if (kind === 'add-col') return openColumnNew();
@@ -322,6 +345,41 @@ async function moveTask(id, columnId, beforeTaskId) {
     toast(e.message, true);
     await loadBoard().catch(() => {});
   }
+}
+
+function sprintTargetCol() {
+  const cols = board.columns.slice().sort((a, b) => a.position - b.position);
+  const blk = cols[0];
+  const target = cols.find((c) => c.id !== blk.id);
+  return target ? target.id : blk.id;
+}
+
+async function moveToSprint(id) {
+  try {
+    await api(`/api/tasks/${id}`, { method: 'PATCH', body: { column_id: sprintTargetCol() } });
+    toast('Moved to current sprint');
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function moveAllToSprint() {
+  const blk = leftmostCol();
+  const ids = board.tasks.filter((t) => t.column_id === blk.id).map((t) => t.id);
+  if (!ids.length) { toast('Backlog is empty', true); return; }
+  const target = sprintTargetCol();
+  for (const id of ids) {
+    try { await api(`/api/tasks/${id}`, { method: 'PATCH', body: { column_id: target } }); } catch (e) {}
+  }
+  toast(`${ids.length} moved to current sprint`);
+  await loadBoard();
+}
+
+function toggleBacklog() {
+  backlogMode = !backlogMode;
+  $('navBoard').classList.toggle('active', !backlogMode);
+  $('navBacklog').classList.toggle('active', backlogMode);
+  $('sidebar').classList.remove('open');
+  renderColumns();
 }
 
 /* ---------- task modal ---------- */
@@ -1158,7 +1216,8 @@ function bindEvents() {
   $('authForm').onsubmit = handleAuth;
   $('logoutBtn').onclick = logout;
   $('menuToggle').onclick = () => $('sidebar').classList.toggle('open');
-  $('navBoard').onclick = () => $('sidebar').classList.remove('open');
+  $('navBoard').onclick = () => { backlogMode = false; $('navBoard').classList.add('active'); $('navBacklog').classList.remove('active'); $('sidebar').classList.remove('open'); renderColumns(); };
+  $('navBacklog').onclick = toggleBacklog;
   $('navSettings').onclick = openSettings;
   $('navLabels').onclick = openLabels;
   $('navMembers').onclick = openMembers;

@@ -101,6 +101,9 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .tag.dot-tag:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.75}
 .tag.cfield{background:#eaf8f0;color:#287a4d}
 .bottom{display:flex;align-items:center;margin-top:12px;padding-top:9px;border-top:1px solid #f0f1f4;color:var(--muted);font-size:10px;gap:7px}
+.backlog-bar{grid-column:1/-1;border:1px dashed #c9c0ee;background:#f7f5ff;color:#5d5386;border-radius:10px;padding:8px 12px;font-size:12px}
+.sprint-btn{margin-left:auto;background:#efebfb;color:#6a5acd;border-radius:7px;padding:3px 8px;font-size:10.5px;font-weight:650;cursor:pointer}
+.sprint-btn:hover{background:#e1dbfa}
 .avatar{width:23px;height:23px;border-radius:50%;background:#dedbff;color:#4d43a2;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:750;flex-shrink:0}
 .due{margin-left:auto;white-space:nowrap}
 
