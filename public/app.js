@@ -879,7 +879,10 @@ function capPills(d) {
 
 async function loadReports() {
   const r = await api('/api/reports');
-  $('repRange').textContent = `holidays: ${r.settings.holidays.length} · ${r.settings.work_hours_per_day}h/day default`;
+  const canEditAdmin = isAdmin();
+  $('repRange').textContent = canEditAdmin
+    ? `holidays: ${r.settings.holidays.length} · ${r.settings.work_hours_per_day}h/day default · capacity & dept editable inline`
+    : `holidays: ${r.settings.holidays.length} · ${r.settings.work_hours_per_day}h/day default (view-only)`;
   $('repDepts').querySelector('tbody').innerHTML = r.departments.map((d) => `
     <tr>
       <td><b>${esc(d.name)}</b><br><span class="rm" style="color:var(--muted);font-size:11px">${capPills(d)}</span></td>
@@ -892,12 +895,40 @@ async function loadReports() {
   $('repMembers').querySelector('tbody').innerHTML = r.members.map((m) => `
     <tr>
       <td><b>${esc(m.username)}</b>${m.override ? ' <span class="week-pill">custom cap</span>' : ''}</td>
-      <td>${esc(m.dept)}</td>
-      <td>${fmtFull(m.capacity)}</td>
+      <td>${canEditAdmin ? `<select class="dept-input" data-dept="${m.id}">
+        <option value="">No dept</option>
+        ${(r.settings.departments || []).map((d) => `<option${d === m.dept ? ' selected' : ''}>${esc(d)}</option>`).join('')}
+      </select>` : esc(m.dept)}</td>
+      <td>${canEditAdmin
+        ? `<input type="number" class="cap-input" data-cap="${m.id}" value="${m.capacity}" min="0" step="0.5" title="Weekly capacity in hours — leave 0 for default (working days × hours/day)">`
+        : fmtFull(m.capacity)}</td>
       <td class="${optCls(m.utilization)}">${fmtFull(m.workload)}</td>
       <td>${fmtFull(m.available)}</td>
       <td>${pctCell(m.utilization)}</td>
     </tr>`).join('') || '<tr><td colspan="6" style="color:var(--muted)">No members</td></tr>';
+  if (canEditAdmin) {
+    const tbl = $('repMembers').querySelector('tbody');
+    const after = async () => { await loadBoard(); await loadReports().catch(() => {}); };
+    tbl.querySelectorAll('[data-dept]').forEach((sel) => {
+      sel.onchange = async () => {
+        try {
+          await api(`/api/members/${sel.dataset.dept}/department`, { method: 'PATCH', body: { department: sel.value } });
+          toast('Department updated');
+          after();
+        } catch (e) { toast(e.message, true); }
+      };
+    });
+    tbl.querySelectorAll('[data-cap]').forEach((inp) => {
+      inp.onchange = async () => {
+        const v = Math.max(0, Number(inp.value) || 0);
+        try {
+          await api(`/api/members/${inp.dataset.cap}/capacity`, { method: 'PATCH', body: { capacity: v } });
+          toast('Capacity updated');
+          after();
+        } catch (e) { toast(e.message, true); }
+      };
+    });
+  }
   const today = new Date();
   $('repWeeks').querySelector('tbody').innerHTML = r.weeks.map((w) => {
     const cur = today >= new Date(w.start + 'T00:00:00') && today <= new Date(w.end + 'T00:00:00');

@@ -940,7 +940,7 @@ app.get('/api/reports', auth, async (req, res, next) => {
       }));
 
     res.json({
-      settings: { holidays, work_hours_per_day: wh },
+      settings: { holidays, work_hours_per_day: wh, departments: st.departments || [] },
       departments: deptTable,
       members: memberTable,
       weeks: weekMatrix,
