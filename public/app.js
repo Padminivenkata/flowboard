@@ -259,12 +259,14 @@ function renderColumns() {
   if (backlogMode) {
     const blk = leftmostCol();
     const arr = list.filter((t) => t.column_id === blk.id);
-    $('columns').innerHTML = `<div class="backlog-bar">SPRINT BACKLOG — unplanned tasks. New tasks land here. During planning, click a card's <b>⋮</b> → <b>Move to active sprint</b> and it goes into your sprint board's <i>To Do</i> column.</div>
-      <div class="column" data-col="${blk.id}">
+    $('columns').innerHTML = `<div class="backlog-title">Sprint Backlog<span>unplanned tasks — plan them into the sprint during planning</span></div>
+      <div class="backlog-bar">New tasks land here. Click a card's <b>⋮</b> → <b>Move to active sprint</b> and it lands in your sprint board's <i>To Do</i> column.</div>
+      <div class="column backlog-col" data-col="${blk.id}">
         <div class="col-head">
           <span class="dot" style="background:${esc(blk.color)}"></span>
           <span class="col-name">${esc(blk.name)}</span>
           <span class="count">${arr.length}</span>
+          ${edit ? `<button class="col-edit" data-act="col-menu" data-col="${blk.id}" title="Edit column: name / colour / position">✎</button>` : ''}
           ${edit ? `<button class="col-edit" data-act="sprint-all" title="Move all to current sprint">⤴ Move all</button>` : ''}
         </div>
         <div class="cards">${arr.length ? arr.map(cardHtml).join('') : '<div class="empty">Backlog is empty — create a task with ＋ New Task</div>'}</div>
@@ -272,11 +274,10 @@ function renderColumns() {
       </div>`;
     return;
   }
-  const leftId = leftmostCol() ? leftmostCol().id : null;
   const flow = board.columns.slice().sort((a, b) => a.position - b.position);
+  if (leftmostCol()) flow.shift();
   let html = flow.map((col) => {
     const arr = list.filter((t) => t.column_id === col.id);
-    const isBacklog = leftId != null && col.id === leftId;
     return `<div class="column" data-col="${col.id}">
       <div class="col-head">
         <span class="dot" style="background:${esc(col.color)}"></span>
@@ -284,10 +285,9 @@ function renderColumns() {
         ${col.stage === 'start' ? `<span class="stage-mark" title="Start column — cycle time starts here" style="color:${esc(col.color)}">▶</span>` : ''}
         ${col.stage === 'done' ? `<span class="stage-mark" title="Done column — cycle time ends here" style="color:${esc(col.color)}">●</span>` : ''}
         <span class="count">${arr.length}</span>
-        ${edit ? `<button class="col-edit" data-act="col-menu" data-col="${col.id}" title="Column options">⋯</button>` : ''}
+        ${edit ? `<button class="col-edit" data-act="col-menu" data-col="${col.id}" title="Edit column: name / colour / position">✎</button>` : ''}
       </div>
       <div class="cards">${arr.length ? arr.map(cardHtml).join('') : '<div class="empty">Drop tasks here</div>'}</div>
-      ${edit && isBacklog ? `<button class="add" data-act="add-card" data-col="${col.id}">＋ New Task</button>` : ''}
     </div>`;
   }).join('');
   if (edit) {

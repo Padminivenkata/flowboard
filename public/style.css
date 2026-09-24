@@ -81,8 +81,8 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .col-head .col-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .add-col-slot{width:288px;flex-shrink:0;background:var(--col-bg);border-radius:12px;padding:10px;min-height:56px;display:flex;align-items:center}
 .add-col-slot .add{width:100%;text-align:center}
-.col-head .col-edit{margin-left:auto;background:transparent;color:#777c89;font-size:16px;padding:2px 7px;border-radius:6px}
-.col-head .col-edit:hover{background:#dde0e9}
+.col-head .col-edit{margin-left:auto;background:transparent;color:#777c89;font-size:14px;padding:2px 7px;border-radius:6px}
+.col-head .col-edit:hover{background:#dde0e9;color:var(--purple)}
 .cards{display:flex;flex-direction:column;gap:9px;min-height:70px;overflow-y:auto;padding-bottom:4px}
 .empty{font-size:11.5px;color:#9aa0af;text-align:center;padding:14px 6px;border:1px dashed #cfd3de;border-radius:8px}
 .dot-btn{border:none;background:transparent;color:#7b8194;cursor:pointer;font-size:15px;line-height:1;padding:2px 5px;border-radius:6px;margin:0 0 0 auto}
@@ -108,6 +108,10 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .tag.cfield{background:#eaf8f0;color:#287a4d}
 .bottom{display:flex;align-items:center;margin-top:12px;padding-top:9px;border-top:1px solid #f0f1f4;color:var(--muted);font-size:10px;gap:7px}
 .backlog-bar{grid-column:1/-1;border:1px dashed #c9c0ee;background:#f7f5ff;color:#5d5386;border-radius:10px;padding:8px 12px;font-size:12px}
+.backlog-title{flex:1 0 100%;display:flex;align-items:baseline;gap:12px;font-weight:800;font-size:19.5px;color:var(--ink);white-space:nowrap;overflow:hidden}
+.backlog-title:before{content:'';width:6px;height:22px;border-radius:4px;background:var(--purple);align-self:center;flex-shrink:0}
+.backlog-title span{font-size:12px;font-weight:500;color:var(--muted);white-space:normal;overflow:hidden;text-overflow:ellipsis}
+.backlog-col{width:min(460px,100%);border:2px solid #cfc6f2;background:#fbfaff;box-shadow:0 4px 14px #0001}
 .sprint-btn{margin-left:auto;background:#efebfb;color:#6a5acd;border-radius:7px;padding:3px 8px;font-size:10.5px;font-weight:650;cursor:pointer}
 .sprint-btn:hover{background:#e1dbfa}
 .avatar{width:23px;height:23px;border-radius:50%;background:#dedbff;color:#4d43a2;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:750;flex-shrink:0}
