@@ -238,7 +238,7 @@ function cardHtml(t) {
       shown++;
     }
   }
-  const inBacklog = backlogMode && edit && leftmostCol() && t.column_id === leftmostCol().id;
+  const inBacklog = edit && leftmostCol() && t.column_id === leftmostCol().id;
   return `<div class="card" data-id="${t.id}" ${edit ? 'draggable="true"' : ''}>
     <div class="task-title">${esc(t.title)}</div>
     <div class="meta">${chips}</div>
@@ -272,9 +272,11 @@ function renderColumns() {
       </div>`;
     return;
   }
-  const flow = board.columns.slice().sort((a, b) => a.position - b.position).slice(1);
+  const leftId = leftmostCol() ? leftmostCol().id : null;
+  const flow = board.columns.slice().sort((a, b) => a.position - b.position);
   let html = flow.map((col) => {
     const arr = list.filter((t) => t.column_id === col.id);
+    const isBacklog = leftId != null && col.id === leftId;
     return `<div class="column" data-col="${col.id}">
       <div class="col-head">
         <span class="dot" style="background:${esc(col.color)}"></span>
@@ -285,6 +287,7 @@ function renderColumns() {
         ${edit ? `<button class="col-edit" data-act="col-menu" data-col="${col.id}" title="Column options">⋯</button>` : ''}
       </div>
       <div class="cards">${arr.length ? arr.map(cardHtml).join('') : '<div class="empty">Drop tasks here</div>'}</div>
+      ${edit && isBacklog ? `<button class="add" data-act="add-card" data-col="${col.id}">＋ New Task</button>` : ''}
     </div>`;
   }).join('');
   if (edit) {
