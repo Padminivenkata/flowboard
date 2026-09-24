@@ -111,6 +111,9 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .backlog-title{flex:1 0 100%;display:flex;align-items:baseline;gap:12px;font-weight:800;font-size:19.5px;color:var(--ink);white-space:nowrap;overflow:hidden}
 .backlog-title:before{content:'';width:6px;height:22px;border-radius:4px;background:var(--purple);align-self:center;flex-shrink:0}
 .backlog-title span{font-size:12px;font-weight:500;color:var(--muted);white-space:normal;overflow:hidden;text-overflow:ellipsis}
+.backlog-note{flex:1 0 100%;border:1px dashed #c9c0ee;background:#f7f5ff;color:#5d5386;border-radius:10px;padding:9px 12px;font-size:13px;display:flex;align-items:center;gap:6px}
+.backlog-note button{margin-left:6px;border:1px solid #b9aef0;background:#fff;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12.5px;color:#4d43a2;font-weight:650}
+.backlog-note button:hover{background:var(--purple);color:#fff;border-color:var(--purple)}
 .backlog-col{width:min(460px,100%);border:2px solid #cfc6f2;background:#fbfaff;box-shadow:0 4px 14px #0001}
 .sprint-btn{margin-left:auto;background:#efebfb;color:#6a5acd;border-radius:7px;padding:3px 8px;font-size:10.5px;font-weight:650;cursor:pointer}
 .sprint-btn:hover{background:#e1dbfa}
