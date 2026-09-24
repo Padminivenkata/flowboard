@@ -279,7 +279,7 @@ function renderColumns() {
   if (leftmostCol()) flow.shift();
   let html = flow.map((col) => {
     const arr = list.filter((t) => t.column_id === col.id);
-    return `<div class="column" data-col="${col.id}">
+    return `<div class="column" data-col="${col.id}" ${edit ? 'draggable="true"' : ''}>
       <div class="col-head">
         <span class="dot" style="background:${esc(col.color)}"></span>
         <span class="col-name">${esc(col.name)}</span>
