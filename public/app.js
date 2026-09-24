@@ -8,6 +8,7 @@ let board = null;
 let socket = null;
 let refreshTimer = null;
 let draggedId = null;
+let dragColId = null;
 let editingTaskId = null;
 let targetColumnId = null;
 let editingColumnId = null;
@@ -312,6 +313,19 @@ function bindBoard() {
   const el = $('columns');
 
   el.addEventListener('dragstart', (e) => {
+    if (canEdit() && !dragColId) {
+      const head = e.target.closest('.col-head');
+      if (head && !e.target.closest('.col-edit')) {
+        const colEl = head.closest('.column');
+        if (colEl) {
+          dragColId = Number(colEl.dataset.col);
+          e.dataTransfer.setData('text/plain', 'col:' + dragColId);
+          e.dataTransfer.effectAllowed = 'move';
+          colEl.classList.add('dragging-col');
+          return;
+        }
+      }
+    }
     const card = e.target.closest('.card');
     if (!card || !canEdit()) { e.preventDefault(); return; }
     draggedId = Number(card.dataset.id);
@@ -322,9 +336,21 @@ function bindBoard() {
   el.addEventListener('dragend', () => {
     clearDropHints();
     document.querySelectorAll('.card.dragging').forEach((c) => c.classList.remove('dragging'));
+    document.querySelectorAll('.column.dragging-col').forEach((c) => c.classList.remove('dragging-col'));
     draggedId = null;
+    dragColId = null;
   });
   el.addEventListener('dragover', (e) => {
+    if (dragColId != null) {
+      const col = e.target.closest('.column');
+      clearDropHints();
+      if (!col || Number(col.dataset.col) === dragColId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const r = col.getBoundingClientRect();
+      col.classList.add((e.clientX - r.left) < r.width / 2 ? 'col-drop-before' : 'col-drop-after');
+      return;
+    }
     if (!canEdit() || draggedId == null) return;
     const col = e.target.closest('.column');
     clearDropHints();
@@ -336,6 +362,18 @@ function bindBoard() {
     else col.classList.add('col-dragover');
   });
   el.addEventListener('drop', (e) => {
+    if (dragColId != null) {
+      e.preventDefault();
+      const col = e.target.closest('.column');
+      const id = dragColId;
+      dragColId = null;
+      clearDropHints();
+      if (col && Number(col.dataset.col) !== id) {
+        const r = col.getBoundingClientRect();
+        reorderColumns(id, Number(col.dataset.col), (e.clientX - r.left) < r.width / 2);
+      }
+      return;
+    }
     if (!canEdit() || draggedId == null) return;
     const col = e.target.closest('.column');
     if (!col) return;
@@ -390,6 +428,24 @@ async function moveToSprint(id) {
   try {
     await api(`/api/tasks/${id}`, { method: 'PATCH', body: { column_id: sprintTargetCol() } });
     toast('Moved to current sprint');
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function reorderColumns(fromId, targetId, before) {
+  try {
+    const blk = leftmostCol();
+    const flow = board.columns.slice().sort((a, b) => a.position - b.position).filter((c) => c.id !== blk.id);
+    const from = flow.findIndex((c) => c.id === fromId);
+    const to = flow.findIndex((c) => c.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = flow.splice(from, 1);
+    let ti = to;
+    if (from < to) ti = to - 1;
+    flow.splice(before ? ti : ti + 1, 0, moved);
+    const ids = [blk.id, ...flow.map((c) => c.id)];
+    await api('/api/board-columns/reorder', { method: 'POST', body: { ids } });
+    toast('Columns reordered');
     await loadBoard();
   } catch (e) { toast(e.message, true); }
 }
