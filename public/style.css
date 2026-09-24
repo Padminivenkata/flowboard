@@ -116,7 +116,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .backlog-title{flex:1 0 100%;display:flex;align-items:baseline;gap:12px;font-weight:800;font-size:19.5px;color:var(--ink);white-space:nowrap;overflow:hidden}
 .backlog-title:before{content:'';width:6px;height:22px;border-radius:4px;background:var(--purple);align-self:center;flex-shrink:0}
 .backlog-title span{font-size:12px;font-weight:500;color:var(--muted);white-space:normal;overflow:hidden;text-overflow:ellipsis}
-.backlog-col{width:min(460px,100%);border:2px solid #cfc6f2;background:#fbfaff;box-shadow:0 4px 14px #0001}
+.backlog-col{width:min(460px,100%);margin-right:auto;border:2px solid #cfc6f2;background:#fbfaff;box-shadow:0 4px 14px #0001}
 .sprint-btn{margin-left:auto;background:#efebfb;color:#6a5acd;border-radius:7px;padding:3px 8px;font-size:10.5px;font-weight:650;cursor:pointer}
 .sprint-btn:hover{background:#e1dbfa}
 .avatar{width:23px;height:23px;border-radius:50%;background:#dedbff;color:#4d43a2;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:750;flex-shrink:0}
