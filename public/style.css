@@ -266,3 +266,66 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .cal-day .cal-task b{display:block;font-size:12px;line-height:1.35}
 .cal-day .cal-task .rm{font-size:10.5px;color:var(--muted);display:block}
 .cal-week .cal-week-days{overflow-x:auto}
+
+/* ---------- sprint report ---------- */
+.sprint-report{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:18px}
+.sr-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.sr-head h3{margin:0;font-size:14px}
+.sr-head em.sub{color:var(--muted);font-style:normal;font-weight:500;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;margin-left:6px}
+.sr-ctrl{display:flex;align-items:center;gap:8px}
+#srSprintSel{padding:7px 9px;border:1px solid var(--purple-border);border-radius:8px;background:#fff;color:var(--purple-ink);font-weight:650;font-size:12.5px;max-width:360px;cursor:pointer}
+.sr-charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:880px){.sr-charts{grid-template-columns:1fr}}
+.sr-fig{margin:0;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fff}
+.sr-fig figcaption{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.sr-empty{color:var(--muted);font-size:12px;padding:10px 2px;margin:0}
+/* donut */
+.donut{width:190px;height:190px;border-radius:50%;background:conic-gradient(var(--purple) 0 var(--p),#e6e7ee var(--p) 100%);display:grid;place-items:center;margin:auto;box-shadow:inset 0 0 0 1px var(--line)}
+.donut-hole{width:120px;height:120px;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.donut-hole b{font-size:30px;line-height:1}
+.donut-hole span{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:700;margin-top:3px}
+.donut-hole em{font-style:normal;font-size:10.5px;color:var(--muted);margin-top:4px}
+/* member rows */
+.sr-mlegend{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-bottom:6px}
+.sr-mlegend span{display:inline-flex;align-items:center;gap:5px}
+.lg{display:inline-block;width:10px;height:10px;border-radius:3px}
+.lg-done{background:#2ea86b}
+.lg-open{background:var(--col-bg)}
+.sr-mrow,.sr-crow{display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:5px 0}
+.sr-mname{font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-mbar{height:10px;background:var(--col-bg);border-radius:6px;overflow:hidden}
+.sr-mdone{display:block;height:100%;background:#2ea86b;border-radius:6px}
+.sr-mval{min-width:104px;text-align:right;font-size:11px;color:var(--muted);white-space:nowrap}
+.sr-mval.sup{color:#26855f;font-weight:750}
+/* capacity rows */
+.sr-cbar{height:12px;background:var(--col-bg);border-radius:6px;overflow:hidden}
+.sr-cused{display:block;height:100%;background:var(--purple);border-radius:6px}
+.sr-ctotal{font-weight:700}
+/* trend */
+.sr-tgrid{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.sr-tcol{display:flex;flex-direction:column;align-items:center;min-width:54px}
+.sr-tbars{display:flex;gap:3px;align-items:flex-end;height:90px}
+.sr-tbar{width:22px;border-radius:4px 4px 0 0}
+.sr-tplan{background:#b9bdca}
+.sr-tact{background:var(--purple)}
+.sr-tlab{max-width:54px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:650;color:var(--muted);margin-top:5px}
+.sr-tmeta{font-size:10px;color:var(--muted)}
+/* lists */
+.sr-lists{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+@media(max-width:880px){.sr-lists{grid-template-columns:1fr}}
+.sr-lists h4{margin:0 0 6px;font-size:12px}
+.sr-tasks{font-size:12.5px}
+.sr-task{border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px}
+.sr-task .rm{color:var(--muted);font-size:11px}
+/* status pills in history table */
+.sr-pill-complete{background:#e8f5ee;color:#26855f}
+.sr-pill-active{background:var(--purple-soft);color:var(--purple-ink)}
+.sr-pill-future{background:var(--col-bg);color:var(--muted)}
+@media print{
+  body *{visibility:hidden !important}
+  #reportsModal,#reportsModal *{visibility:visible !important}
+  #reportsModal{position:static !important;inset:auto !important;background:#fff !important;overflow:visible !important;padding:0 !important}
+  #reportsModal .modal{box-shadow:none !important;max-height:none !important;overflow:visible !important;width:100% !important}
+  .rep-grid,#reportsModal .modal-actions,#reportsModal .sr-ctrl,#reportsModal .hint{display:none !important}
+  .sprint-report{background:#fff;border:none;padding:0;margin:0}
+}

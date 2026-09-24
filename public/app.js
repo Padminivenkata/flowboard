@@ -1009,14 +1009,16 @@ async function loadReports() {
       <td>${cols || '—'}</td>
     </tr>`;
   }).join('');
-  $('repSprints').querySelector('tbody').innerHTML = r.sprints.map((s) => `
+  $('repSprints').querySelector('tbody').innerHTML = [...r.sprints].reverse().map((s) => `
     <tr>
+      <td><span class="week-pill sr-pill-${s.status}">${s.status}</span></td>
       <td><b>${esc(s.name)}</b><br><span class="rm" style="color:var(--muted);font-size:11px">${s.start || '—'} → ${s.end || 'now'}</span></td>
+      <td>${s.done} / ${s.open}</td>
       <td>${fmtFull(s.plannedHours)}</td>
       <td>${fmtFull(s.actualHours)}</td>
       <td class="${s.velocity == null ? '' : optCls(s.velocity)}">${s.velocity == null ? '—' : s.velocity + '%'}</td>
       <td>${s.spilled}</td>
-    </tr>`).join('') || '<tr><td colspan="5" style="color:var(--muted)">No completed sprint yet — End the current sprint to record history &amp; velocity</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="7" style="color:var(--muted)">No sprints yet — create one from the top bar</td></tr>';
   $('repRecur').innerHTML = r.recurringTasks.length
     ? r.recurringTasks.map((t) => `<div class="rr">
       <span><b>${esc(t.title)}</b><span class="rm"> · ${esc(t.assignee || 'unassigned')}</span></span>
@@ -1025,7 +1027,88 @@ async function loadReports() {
     : '<div style="color:var(--muted);font-size:12.5px">No recurring tasks — set a recurrence in task edit</div>';
   holidayDraft = [...r.settings.holidays];
   renderHolidays();
+  renderSprintReport(r);
   openModal('reportsModal');
+}
+
+/* ---------- sprint report charts ---------- */
+let srData = [];
+
+function renderSprintReport(r) {
+  srData = r.sprints || [];
+  const sel = $('srSprintSel');
+  sel.innerHTML = srData.map((s) => {
+    const label = s.start
+      ? `${s.name} · ${s.status} (${s.start} → ${s.end || 'now'})`
+      : `${s.name} · ${s.status}`;
+    return `<option value="${s.id}">${esc(label)}</option>`;
+  }).join('');
+  const active = srData.find((x) => x.status === 'active');
+  const def = active || srData[srData.length - 1];
+  sel.onchange = () => renderSprintCharts(Number(sel.value));
+  renderSprintCharts(def ? Number(def.id) : null);
+}
+
+function taskRow(t) {
+  return `<div class="sr-task"><span class="grow"><b>${esc(t.title)}</b><span class="rm"> · ${esc(t.assignee || 'unassigned')}</span></span><span class="rm">${t.column ? esc(t.column) + ' · ' : ''}${fmtFull(t.hours)}</span></div>`;
+}
+
+function renderTrend(completed) {
+  if (!completed.length) return '<p class="sr-empty">No completed sprint yet — end a sprint to see the trend.</p>';
+  const max = Math.max(1, ...completed.map((x) => Math.max(x.plannedHours, x.actualHours)));
+  return `<div class="sr-tgrid">${completed.map((x) => `
+    <div class="sr-tcol" title="${esc(x.name)}">
+      <div class="sr-tbars">
+        <i class="sr-tbar sr-tplan" style="height:${Math.round((x.plannedHours / max) * 100)}%"></i>
+        <i class="sr-tbar sr-tact" style="height:${Math.round((x.actualHours / max) * 100)}%"></i>
+      </div>
+      <div class="sr-tlab">${esc(x.name)}</div>
+      <div class="sr-tmeta">${x.done}/${x.total}${x.velocity != null ? ' · ' + x.velocity + '%' : ''}</div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function renderSprintCharts(id) {
+  const s = srData.find((x) => x.id === id);
+  $('srDonut').innerHTML = '';
+  $('srMembers').innerHTML = '';
+  $('srCapacity').innerHTML = '';
+  $('srTrend').innerHTML = '';
+  $('srDoneList').innerHTML = '';
+  $('srOpenList').innerHTML = '';
+  if (!s) {
+    $('srDonut').innerHTML = '<p class="sr-empty">No sprints yet — create one from the top bar.</p>';
+    return;
+  }
+  const donePct = s.donePct ?? 0;
+  $('srDonut').innerHTML = `<div class="donut" style="--p:${donePct}%">
+    <div class="donut-hole"><b>${donePct}%</b><span>complete</span><em>${s.done} done · ${s.open} open</em></div>
+  </div>`;
+  const doneCls = s.total > 0 && s.done === s.total ? 'sup' : '';
+  const mrows = s.byAssignee.length ? s.byAssignee.map((m) => {
+    const mp = m.total ? Math.round((m.done / m.total) * 100) : 0;
+    return `<div class="sr-mrow">
+      <span class="sr-mname">${esc(m.username)}</span>
+      <div class="sr-mbar"><i class="sr-mdone" style="width:${mp}%"></i></div>
+      <span class="sr-mval ${m.done === m.total && m.total > 0 ? 'sup' : ''}">${m.done}/${m.total} · ${fmtFull(m.hours)}</span>
+    </div>`;
+  }).join('') : '<p class="sr-empty">No tasks assigned to members in this sprint.</p>';
+  $('srMembers').innerHTML = `<div class="sr-mlegend"><span><i class="lg lg-done"></i>done</span><span><i class="lg lg-open"></i>open</span></div>${mrows}`;
+  const capRows = [
+    `<div class="sr-crow sr-ctotal"><span class="sr-mname">Total</span>
+      <div class="sr-cbar"><i class="sr-cused" style="width:${s.capacityHours > 0 ? Math.min(100, (s.usedHours / s.capacityHours) * 100) : 0}%"></i></div>
+      <span class="sr-mval">${fmtFull(s.usedHours)} / ${fmtFull(s.capacityHours)}${s.utilization == null ? '' : ' · ' + s.utilization + '%'}</span></div>`,
+    ...s.byAssignee.map((m) => {
+      const w = m.cap > 0 ? Math.min(100, (m.hours / m.cap) * 100) : 0;
+      return `<div class="sr-crow"><span class="sr-mname">${esc(m.username)}</span>
+        <div class="sr-cbar"><i class="sr-cused" style="width:${w}%"></i></div>
+        <span class="sr-mval">${fmtFull(m.hours)} / ${fmtFull(m.cap)}${m.utilization == null ? '' : ' · ' + m.utilization + '%'}</span></div>`;
+    }),
+  ];
+  $('srCapacity').innerHTML = capRows.join('');
+  $('srTrend').innerHTML = renderTrend(srData.filter((x) => x.status === 'complete'));
+  $('srDoneList').innerHTML = s.doneTasks.length ? s.doneTasks.map(taskRow).join('') : '<p class="sr-empty">Nothing completed in this sprint yet.</p>';
+  $('srOpenList').innerHTML = s.openTasks.length ? s.openTasks.map(taskRow).join('') : '<p class="sr-empty">All tasks in this sprint are done!</p>';
 }
 
 function renderHolidays() {
@@ -1380,6 +1463,7 @@ function bindEvents() {
   $('calClose').onclick = () => closeModal('calendarModal');
   $('navReports').onclick = openReports;
   $('repClose').onclick = () => closeModal('reportsModal');
+  $('srPrint').onclick = () => window.print();
   $('repHolidayAdd').onclick = async () => {
     const v = $('repHolidayNew').value;
     if (!v) { toast('Pick a date first', true); return; }

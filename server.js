@@ -87,6 +87,19 @@ function holidaysInWeek(monday, holidays) {
   const days = weekDates(monday, 7).filter((d) => new Date(d + 'T00:00:00').getDay() !== 0 && new Date(d + 'T00:00:00').getDay() !== 6);
   return days.filter((d) => holidays.includes(d));
 }
+function workingDaysBetween(start, end, holidays) {
+  const s = new Date((start || '') + 'T00:00:00');
+  const e = new Date((end || '') + 'T00:00:00');
+  if (isNaN(s) || isNaN(e)) return 0;
+  let n = 0;
+  for (const d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    const dw = d.getDay();
+    if (dw === 0 || dw === 6) continue;
+    if (holidays.includes(dateKey(d))) continue;
+    n++;
+  }
+  return n;
+}
 function nextRecurDate(due, recur) {
   const d = new Date((due || dateKey(new Date())) + 'T00:00:00');
   if (recur === 'daily') d.setDate(d.getDate() + 1);
@@ -1005,7 +1018,7 @@ app.get('/api/reports', auth, async (req, res, next) => {
     const members = (await db.execute('SELECT * FROM users ORDER BY username COLLATE NOCASE')).rows;
     const columns = (await db.execute('SELECT * FROM board_columns ORDER BY position, id')).rows;
     const tasks = (await db.execute('SELECT * FROM tasks')).rows.map(normTask);
-    const sprints = (await db.execute("SELECT * FROM sprints WHERE status = 'complete' ORDER BY id DESC LIMIT 20")).rows;
+    const sprints = (await db.execute('SELECT * FROM sprints ORDER BY id ASC')).rows;
 
     const holidays = st.holidays || [];
     const wh = st.work_hours_per_day || 6;
@@ -1116,19 +1129,74 @@ app.get('/api/reports', auth, async (req, res, next) => {
         completions: t.recurHistory.length,
       }));
 
-    res.json({
-      settings: { holidays, work_hours_per_day: wh, departments: st.departments || [] },
-      departments: deptTable,
-      members: memberTable,
-      weeks: weekMatrix,
-      sprints: sprints.map((s) => ({
-        id: Number(s.id), name: s.name, start: s.start_date, end: s.end_date,
+    const sprintRows = sprints.map((s) => {
+      const sid = Number(s.id);
+      const inSprint = tasks.filter((t) => t.sprint_id === sid);
+      const total = inSprint.length;
+      const done = doneId ? inSprint.filter((t) => t.column_id === doneColId).length : 0;
+      const usedHours = inSprint.reduce((acc, t) => acc + hoursInt(t.hours), 0);
+      const wd = workingDaysBetween(s.start_date, s.end_date, holidays);
+      const dailyRateOf = (m) => {
+        const cap = Number(m.capacity) || 0;
+        return cap > 0 ? cap / workDays : wh;
+      };
+      const capByName = new Map();
+      let capacityHours = 0;
+      for (const m of members) {
+        const c = Math.round(dailyRateOf(m) * wd * 10) / 10;
+        capByName.set(m.username, c);
+        capacityHours += c;
+      }
+      capacityHours = Math.round(capacityHours * 10) / 10;
+      const usedByName = new Map();
+      const doneByName = new Map();
+      const totalByName = new Map();
+      for (const t of inSprint) {
+        if (!t.assignee) continue;
+        usedByName.set(t.assignee, (usedByName.get(t.assignee) || 0) + hoursInt(t.hours));
+        totalByName.set(t.assignee, (totalByName.get(t.assignee) || 0) + 1);
+        if (doneId && t.column_id === doneColId) doneByName.set(t.assignee, (doneByName.get(t.assignee) || 0) + 1);
+      }
+      const byAssignee = [...totalByName.entries()].map(([username, t]) => {
+        const cap = capByName.get(username) || 0;
+        const used = Math.round((usedByName.get(username) || 0) * 10) / 10;
+        return {
+          username, total: t,
+          done: doneByName.get(username) || 0,
+          hours: used,
+          cap,
+          utilization: cap > 0 ? Math.round((used / cap) * 100) : null,
+        };
+      }).sort((a, b) => b.hours - a.hours);
+      const taskBrief = (t) => {
+        const c = columns.find((x) => Number(x.id) === t.column_id);
+        return { title: t.title, assignee: t.assignee, hours: Math.round(hoursInt(t.hours) * 10) / 10, column: c ? c.name : '' };
+      };
+      return {
+        id: sid, name: s.name, status: s.status,
+        start: s.start_date || '', end: s.end_date || '',
         plannedHours: Math.round((Number(s.planned_minutes) / 60) * 10) / 10,
         actualHours: Math.round((Number(s.actual_minutes) / 60) * 10) / 10,
         velocity: Number(s.planned_minutes) > 0
           ? Math.round((Number(s.actual_minutes) / Number(s.planned_minutes)) * 100) : null,
         spilled: Number(s.spilled_count),
-      })),
+        total, done, open: total - done,
+        donePct: total > 0 ? Math.round((done / total) * 100) : null,
+        usedHours: Math.round(usedHours * 10) / 10,
+        capacityHours,
+        utilization: capacityHours > 0 ? Math.round((usedHours / capacityHours) * 100) : null,
+        byAssignee,
+        doneTasks: inSprint.filter((t) => doneId && t.column_id === doneColId).map(taskBrief),
+        openTasks: inSprint.filter((t) => !(doneId && t.column_id === doneColId)).map(taskBrief),
+      };
+    });
+
+    res.json({
+      settings: { holidays, work_hours_per_day: wh, departments: st.departments || [] },
+      departments: deptTable,
+      members: memberTable,
+      weeks: weekMatrix,
+      sprints: sprintRows,
       recurringTasks,
       columns: columns.map((c) => ({ id: Number(c.id), name: c.name, stage: c.stage })),
     });

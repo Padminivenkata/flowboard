@@ -297,6 +297,25 @@
       <span class="cal-range" id="repRange"></span>
     </h2>
     <p class="hint">Working days Mon–Fri. Each resource = work hours/day × working days (holidays auto-excluded). Department capacity = resources × that.</p>
+    <div class="sprint-report">
+      <div class="sr-head">
+        <h3>Sprint Report <em class="sub">auto-generated charts</em></h3>
+        <span class="sr-ctrl">
+          <select id="srSprintSel" title="Pick a sprint"></select>
+          <button class="secondary" id="srPrint" type="button">Print / PDF</button>
+        </span>
+      </div>
+      <div id="srCharts" class="sr-charts">
+        <figure class="sr-fig"><figcaption>Completion</figcaption><div id="srDonut"></div></figure>
+        <figure class="sr-fig"><figcaption>Per-member completion</figcaption><div id="srMembers" class="sr-members"></div></figure>
+        <figure class="sr-fig"><figcaption>Capacity vs used (hours)</figcaption><div id="srCapacity" class="sr-capacity"></div></figure>
+        <figure class="sr-fig"><figcaption>Velocity trend — all sprints</figcaption><div id="srTrend" class="sr-trend"></div></figure>
+      </div>
+      <div class="sr-lists">
+        <div><h4>Done in this sprint</h4><div id="srDoneList" class="sr-tasks"></div></div>
+        <div><h4>Still open in sprint</h4><div id="srOpenList" class="sr-tasks"></div></div>
+      </div>
+    </div>
     <div class="rep-grid">
       <section>
         <h3>Department capacity &amp; utilisation <em class="sub">this week · buckets</em></h3>
@@ -320,7 +339,7 @@
         </table></div>
         <h3>Sprint history &amp; velocity</h3>
         <table class="rep-table" id="repSprints">
-          <thead><tr><th>Sprint</th><th>Planned</th><th>Actual</th><th>Velocity</th><th>Spilled</th></tr></thead>
+          <thead><tr><th>Status</th><th>Sprint</th><th>Done / Open</th><th>Planned</th><th>Actual</th><th>Velocity</th><th>Spilled</th></tr></thead>
           <tbody></tbody>
         </table>
         <h3>Holidays <em class="sub">reduce capacity that week</em></h3>
