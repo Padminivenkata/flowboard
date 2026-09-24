@@ -260,7 +260,7 @@ function renderColumns() {
     const blk = leftmostCol();
     const arr = list.filter((t) => t.column_id === blk.id);
     $('columns').innerHTML = `<div class="backlog-title">Sprint Backlog<span>unplanned tasks — plan them into the sprint during planning</span></div>
-      <div class="backlog-bar">New tasks land here. Click a card's <b>⋮</b> → <b>Move to active sprint</b> and it lands in your sprint board's <i>To Do</i> column.</div>
+      <div class="backlog-bar">New tasks land here. Click a card's <b>⋮</b> → <b>Move to new sprint</b> and it lands in your sprint board's <i>To Do</i> column.</div>
       <div class="column backlog-col" data-col="${blk.id}">
         <div class="col-head">
           <span class="dot" style="background:${esc(blk.color)}"></span>
@@ -424,7 +424,7 @@ function openTaskMenu(btn) {
   const r = btn.getBoundingClientRect();
   const menu = document.createElement('div');
   menu.className = 'task-menu-pop';
-  menu.innerHTML = `<button type="button" data-move="${id}">Move to active sprint</button>`;
+  menu.innerHTML = `<button type="button" data-move="${id}">Move to new sprint</button>`;
   menu.style.top = `${Math.min(r.bottom + 5, window.innerHeight - 48)}px`;
   menu.style.left = `${Math.max(8, r.left)}px`;
   document.body.appendChild(menu);
