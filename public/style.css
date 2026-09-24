@@ -182,6 +182,8 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .statbar .stat span{padding:2px 8px;border-radius:10px;background:var(--col-bg);color:var(--ink);font-weight:650}
 .capacity-wrap{margin:12px 18px 0;border:1px solid var(--card-line);border-radius:12px;background:#fff;padding:12px 14px}
 .capacity-head{display:flex;align-items:center;gap:10px;font-size:13px;margin-bottom:10px}
+.cap-toggle{margin-left:auto;border:1px solid var(--line2);background:#fff;border-radius:8px;width:26px;height:26px;cursor:pointer;color:var(--ink);font-size:12px;line-height:1}
+.cap-toggle:hover{background:var(--col-bg)}
 .capacity-head .cap-summary{color:var(--muted);font-size:12px}
 .capacity-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
 .cap-item{border:1px solid var(--card-line);border-radius:10px;padding:9px 10px}

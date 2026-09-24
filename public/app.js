@@ -128,13 +128,14 @@ function renderStats() {
 
 function renderCapacity() {
   const caps = board.capacity || [];
-  const hasData = caps.some((c) => c.capacity > 0 || c.workload > 0);
+  const active = caps.filter((c) => c.workload > 0);
+  const hasData = active.length > 0;
   $('capacityWrap').hidden = !hasData;
   if (!hasData) return;
   const totCap = caps.reduce((s, c) => s + c.capacity, 0);
   const totLoad = caps.reduce((s, c) => s + c.workload, 0);
-  $('capSummary').textContent = `${fmtFull(totLoad)} of ${totCap || 'no'} hrs capacity assigned`;
-  $('capacityList').innerHTML = caps.map((c) => {
+  $('capSummary').textContent = `${fmtFull(totLoad)} of ${fmtFull(totCap)} hrs capacity assigned`;
+  $('capacityList').innerHTML = active.map((c) => {
     const pct = c.capacity > 0 ? Math.round((c.workload / c.capacity) * 100) : 0;
     const cls = c.capacity > 0 ? (pct >= 100 ? 'over' : pct >= 80 ? 'warn' : 'ok') : 'na';
     const barW = c.capacity > 0 ? Math.min(100, pct) : 0;
@@ -148,6 +149,16 @@ function renderCapacity() {
       <div class="cap-top" style="margin-top:4px"><span class="cap-score ${cls}">${score === '—' ? 'capacity not set' : score + ' utilized'}</span></div>
     </div>`;
   }).join('');
+  $('capacityList').hidden = false;
+  const tog = $('capToggle');
+  tog.setAttribute('aria-expanded', 'true');
+  tog.textContent = '▾';
+  tog.onclick = () => {
+    const l = $('capacityList');
+    l.hidden = !l.hidden;
+    tog.textContent = l.hidden ? '▸' : '▾';
+    tog.setAttribute('aria-expanded', String(!l.hidden));
+  };
 }
 
 function fillSelect(sel, values, current, allLabel) {
