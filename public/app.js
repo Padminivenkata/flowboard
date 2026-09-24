@@ -1656,7 +1656,7 @@ function bindEvents() {
     await saveHolidays();
   };
   $('mDept').onchange = () => fillAssigneeList($('mDept').value);
-  $('btnNewTask').onclick = () => openTaskNew(board && board.columns.length ? sprintTargetCol() : null);
+  $('btnNewTask').onclick = () => openTaskNew(null);
   $('btnNewSprint').onclick = () => openSprintModal(null);
   $('sprintSelect').onchange = () => {
     const v = Number($('sprintSelect').value);
