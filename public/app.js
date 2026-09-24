@@ -260,8 +260,8 @@ function renderColumns() {
   if (backlogMode) {
     const blk = leftmostCol();
     const arr = list.filter((t) => t.column_id === blk.id);
-    $('columns').innerHTML = `<div class="backlog-title">Sprint Backlog<span>unplanned tasks — plan them into the sprint during planning</span></div>
-      <div class="backlog-bar">New tasks land here. Click a card's <b>⋮</b> → <b>Move to new sprint</b> and it lands in your To Do column on the task board.</div>
+    $('columns').innerHTML = `<div class="backlog-title">Backlog<span>new tasks land here until you move them to the Task Board</span></div>
+      <div class="backlog-bar">Click a card's <b>⋮</b> → <b>Move to Task Board</b> and it goes to your <i>To Do</i> column — same task, nothing duplicated, full history kept.</div>
       <div class="column backlog-col" data-col="${blk.id}">
         <div class="col-head">
           <span class="dot" style="background:${esc(blk.color)}"></span>
@@ -421,7 +421,7 @@ function sprintTargetCol() {
 async function moveToSprint(id) {
   try {
     await api(`/api/tasks/${id}`, { method: 'PATCH', body: { column_id: sprintTargetCol() } });
-    toast('Moved to current sprint');
+    toast('Moved to Task Board → To Do');
     await loadBoard();
   } catch (e) { toast(e.message, true); }
 }
@@ -474,7 +474,7 @@ function openTaskMenu(btn) {
   const r = btn.getBoundingClientRect();
   const menu = document.createElement('div');
   menu.className = 'task-menu-pop';
-  menu.innerHTML = `<button type="button" data-move="${id}">Move to Task Board → To Do</button>`;
+  menu.innerHTML = `<button type="button" data-move="${id}">Move to Task Board</button>`;
   menu.style.top = `${Math.min(r.bottom + 5, window.innerHeight - 48)}px`;
   menu.style.left = `${Math.max(8, r.left)}px`;
   document.body.appendChild(menu);
