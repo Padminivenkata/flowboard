@@ -246,7 +246,7 @@ function cardHtml(t) {
       <span class="avatar">${initials(t.assignee)}</span>
       <span>${esc(t.assignee || 'Unassigned')}</span>
       <span class="due">${esc(fmtDue(t.due))}</span>
-      ${inBacklog ? `<button class="sprint-btn" data-act="to-sprint" type="button">→ Sprint</button>` : ''}
+      ${inBacklog ? `<button class="dot-btn" data-act="task-menu" data-id="${t.id}" type="button" title="Actions">⋮</button>` : ''}
     </div>
   </div>`;
 }
@@ -259,20 +259,21 @@ function renderColumns() {
   if (backlogMode) {
     const blk = leftmostCol();
     const arr = list.filter((t) => t.column_id === blk.id);
-    $('columns').innerHTML = `<div class="backlog-bar">SPRINT BACKLOG — tasks waiting to be planned · <b>→ Sprint</b> on a card (or ⤴ Sprint on the column) moves it into the current sprint. Create tasks here with the ＋ button — full options, including recurrence, apply.</div>
+    $('columns').innerHTML = `<div class="backlog-bar">SPRINT BACKLOG — unplanned tasks. New tasks land here. During planning, click a card's <b>⋮</b> → <b>Move to active sprint</b> and it goes into your sprint board's <i>To Do</i> column.</div>
       <div class="column" data-col="${blk.id}">
         <div class="col-head">
           <span class="dot" style="background:${esc(blk.color)}"></span>
           <span class="col-name">${esc(blk.name)}</span>
           <span class="count">${arr.length}</span>
-          ${edit ? `<button class="col-edit" data-act="sprint-all" title="Move all to current sprint">⤴ Sprint</button>` : ''}
+          ${edit ? `<button class="col-edit" data-act="sprint-all" title="Move all to current sprint">⤴ Move all</button>` : ''}
         </div>
-        <div class="cards">${arr.length ? arr.map(cardHtml).join('') : '<div class="empty">Drop tasks here</div>'}</div>
-        ${edit ? `<button class="add" data-act="add-card" data-col="${blk.id}">＋ Add task</button>` : ''}
+        <div class="cards">${arr.length ? arr.map(cardHtml).join('') : '<div class="empty">Backlog is empty — create a task with ＋ New Task</div>'}</div>
+        ${edit ? `<button class="add" data-act="add-card" data-col="${blk.id}">＋ New Task</button>` : ''}
       </div>`;
     return;
   }
-  let html = board.columns.map((col) => {
+  const flow = board.columns.slice().sort((a, b) => a.position - b.position).slice(1);
+  let html = flow.map((col) => {
     const arr = list.filter((t) => t.column_id === col.id);
     return `<div class="column" data-col="${col.id}">
       <div class="col-head">
@@ -284,7 +285,6 @@ function renderColumns() {
         ${edit ? `<button class="col-edit" data-act="col-menu" data-col="${col.id}" title="Column options">⋯</button>` : ''}
       </div>
       <div class="cards">${arr.length ? arr.map(cardHtml).join('') : '<div class="empty">Drop tasks here</div>'}</div>
-      ${edit ? `<button class="add" data-act="add-card" data-col="${col.id}">＋ Add task</button>` : ''}
     </div>`;
   }).join('');
   if (edit) {
@@ -346,6 +346,7 @@ function bindBoard() {
     if (act) {
       const kind = act.dataset.act;
       if (kind === 'to-sprint') { e.stopPropagation(); moveToSprint(Number(act.closest('.card').dataset.id)); return; }
+      if (kind === 'task-menu') { e.stopPropagation(); openTaskMenu(act); return; }
       if (kind === 'sprint-all') { moveAllToSprint(); return; }
       if (kind === 'add-card') return openTaskNew(Number(act.dataset.col));
       if (kind === 'col-menu') return openColumnEdit(Number(act.dataset.col));
@@ -403,6 +404,29 @@ function toggleBacklog() {
   $('sidebar').classList.remove('open');
   renderColumns();
 }
+
+function closeTaskMenu() {
+  document.querySelectorAll('.task-menu-pop').forEach((el) => el.remove());
+}
+
+function openTaskMenu(btn) {
+  closeTaskMenu();
+  const id = Number(btn.dataset.id);
+  const r = btn.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'task-menu-pop';
+  menu.innerHTML = `<button type="button" data-move="${id}">Move to active sprint</button>`;
+  menu.style.top = `${Math.min(r.bottom + 5, window.innerHeight - 48)}px`;
+  menu.style.left = `${Math.max(8, r.left)}px`;
+  document.body.appendChild(menu);
+  menu.querySelector('[data-move]').onclick = () => {
+    closeTaskMenu();
+    moveToSprint(id);
+  };
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.task-menu-pop') && !e.target.closest('.dot-btn')) closeTaskMenu();
+});
 
 /* ---------- task modal ---------- */
 function fillHours() {

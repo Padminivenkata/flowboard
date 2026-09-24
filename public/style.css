@@ -85,6 +85,12 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .col-head .col-edit:hover{background:#dde0e9}
 .cards{display:flex;flex-direction:column;gap:9px;min-height:70px;overflow-y:auto;padding-bottom:4px}
 .empty{font-size:11.5px;color:#9aa0af;text-align:center;padding:14px 6px;border:1px dashed #cfd3de;border-radius:8px}
+.dot-btn{border:none;background:transparent;color:#7b8194;cursor:pointer;font-size:15px;line-height:1;padding:2px 5px;border-radius:6px;margin:0 0 0 auto}
+.dot-btn:hover{background:var(--col-bg);color:var(--ink)}
+.task-menu-pop{position:fixed;z-index:200;background:#fff;border:1px solid var(--line2);border-radius:10px;box-shadow:0 10px 28px #0002a;min-width:180px;padding:5px;animation:pop .1s ease}
+@keyframes pop{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+.task-menu-pop button{display:block;width:100%;text-align:left;border:none;background:transparent;padding:9px 10px;border-radius:7px;cursor:pointer;font-size:13px;color:var(--ink);font-weight:600}
+.task-menu-pop button:hover{background:var(--col-bg);color:var(--purple)}
 .add{background:transparent;color:#777c89;font-size:12px;padding:9px;border-radius:8px;text-align:left;margin-top:8px}
 .add:hover{background:#dde0e9}
 
