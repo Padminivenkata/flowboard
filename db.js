@@ -31,9 +31,22 @@ CREATE TABLE IF NOT EXISTS settings (
   sprint_start TEXT NOT NULL DEFAULT '',
   sprint_end TEXT NOT NULL DEFAULT '',
   sprint_active INTEGER NOT NULL DEFAULT 0,
+  active_sprint_id INTEGER NOT NULL DEFAULT 0,
   departments TEXT NOT NULL DEFAULT '["Development","QA","Product","Operations"]',
   priorities TEXT NOT NULL DEFAULT '["High","Medium","Low"]',
   invite_code TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS sprints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL DEFAULT 'Sprint',
+  start_date TEXT NOT NULL DEFAULT '',
+  end_date TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'future',
+  planned_minutes REAL NOT NULL DEFAULT 0,
+  actual_minutes REAL NOT NULL DEFAULT 0,
+  spilled_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS board_columns (
@@ -90,6 +103,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   acceptance TEXT NOT NULL DEFAULT '',
   tags TEXT NOT NULL DEFAULT '[]',
   custom_values TEXT NOT NULL DEFAULT '{}',
+  sprint_id INTEGER NOT NULL DEFAULT 0,
   position INTEGER NOT NULL DEFAULT 0,
   recur TEXT NOT NULL DEFAULT '',
   recur_history TEXT NOT NULL DEFAULT '[]',
@@ -135,6 +149,9 @@ export async function initDb() {
   if (!pcols.rows.some((r) => r.name === 'work_hours_per_day')) {
     await db.execute("ALTER TABLE settings ADD COLUMN work_hours_per_day TEXT NOT NULL DEFAULT '6'");
   }
+  if (!pcols.rows.some((r) => r.name === 'active_sprint_id')) {
+    await db.execute('ALTER TABLE settings ADD COLUMN active_sprint_id INTEGER NOT NULL DEFAULT 0');
+  }
 
   const ucols = await db.execute('PRAGMA table_info(users)');
   if (!ucols.rows.some((r) => r.name === 'capacity')) {
@@ -179,10 +196,29 @@ export async function initDb() {
   if (!tcols.rows.some((r) => r.name === 'spilled')) {
     await db.execute('ALTER TABLE tasks ADD COLUMN spilled INTEGER NOT NULL DEFAULT 0');
   }
+  if (!tcols.rows.some((r) => r.name === 'sprint_id')) {
+    await db.execute('ALTER TABLE tasks ADD COLUMN sprint_id INTEGER NOT NULL DEFAULT 0');
+  }
 
   const settings = await db.execute('SELECT id FROM settings WHERE id = 1');
   if (!settings.rows.length) {
     await db.execute(`INSERT INTO settings (id) VALUES (1) ON CONFLICT(id) DO NOTHING`);
+  }
+  const settingsRow = (await db.execute('SELECT * FROM settings WHERE id = 1')).rows[0];
+
+  const scount = await db.execute('SELECT COUNT(*) c FROM sprints');
+  if (Number(scount.rows[0].c) === 0 && settingsRow) {
+    const legacyActive = Number(settingsRow.sprint_active) === 1;
+    await db.execute({
+      sql: 'INSERT INTO sprints (id, name, start_date, end_date, status) VALUES (1,?,?,?,?)',
+      args: [
+        settingsRow.sprint_name || 'Sprint 1',
+        settingsRow.sprint_start || '',
+        settingsRow.sprint_end || '',
+        legacyActive ? 'active' : 'future',
+      ],
+    });
+    await db.execute({ sql: 'UPDATE settings SET active_sprint_id = 1 WHERE id = 1', args: [] });
   }
 
   const cols = await db.execute('SELECT COUNT(*) c FROM board_columns');
@@ -198,6 +234,18 @@ export async function initDb() {
         sql: `INSERT INTO tasks (id, column_id, title, assignee, department, priority, due, hours, outcome, acceptance, tags, custom_values, position)
               VALUES (?,?,?,?,?,?,?,?,?,?,'[]','{}',?)`,
         args: [id, col, title, assignee, dept, priority, due, hours, outcome, ac, pos],
+      });
+    }
+  }
+
+  const current = (await db.execute('SELECT active_sprint_id FROM settings WHERE id = 1')).rows[0];
+  const activeId = Number(current?.active_sprint_id) || 0;
+  if (activeId > 0) {
+    const leftmost = (await db.execute('SELECT id FROM board_columns ORDER BY position, id LIMIT 1')).rows[0];
+    if (leftmost) {
+      await db.execute({
+        sql: 'UPDATE tasks SET sprint_id = ? WHERE sprint_id = 0 AND column_id != ?',
+        args: [activeId, Number(leftmost.id)],
       });
     }
   }

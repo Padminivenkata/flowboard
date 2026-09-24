@@ -56,7 +56,12 @@
     <header class="topbar">
       <button class="icon-btn menu-toggle" id="menuToggle" type="button" title="Menu">☰</button>
       <div class="title" id="boardTitle">Task Board</div>
-      <div class="sprint" id="sprintPill">SPRINT <b id="sprintName"></b></div>
+      <div class="sprint-group">
+        <label class="sprint-label" for="sprintSelect">SPRINT</label>
+        <select class="sprint-select" id="sprintSelect" title="Current sprint"></select>
+        <button class="icon-btn sprint-add" id="btnNewSprint" type="button" title="New sprint">＋</button>
+      </div>
+      <button class="secondary" id="btnSprintEdit" type="button" title="Edit sprint" hidden>✎</button>
       <button class="secondary" id="btnNewTask" type="button">+ Task</button>
       <button class="primary" id="btnSprint" type="button">Start Sprint</button>
     </header>
@@ -164,9 +169,6 @@
     <div class="form">
       <div class="field"><label>Workspace name</label><input id="sWorkspace"></div>
       <div class="field"><label>Board title</label><input id="sBoard"></div>
-      <div class="field full"><label>Sprint label</label><input id="sSprint" placeholder="e.g. Sep 28 – Oct 2"></div>
-      <div class="field"><label>Sprint start</label><input id="sStart" type="date"></div>
-      <div class="field"><label>Sprint end</label><input id="sEnd" type="date"></div>
       <div class="field"><label>Work hours / day</label><input id="sHrsDay" type="number" min="1" max="24" value="6"></div>
       <div class="field full"><label>Departments</label><div class="list-editor" id="sDepts"></div>
         <div class="add-row"><input id="sDeptNew" placeholder="Add department"><button class="secondary" id="sDeptAdd" type="button">Add</button></div>
@@ -178,6 +180,39 @@
     <div class="modal-actions">
       <button class="secondary" id="sCancel" type="button">Cancel</button>
       <button class="primary" id="sSave" type="button">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SPRINT MODAL ============ -->
+<div class="modal-back" id="sprintModal">
+  <div class="modal small">
+    <h2 id="sprintModalTitle">New Sprint</h2>
+    <div class="form">
+      <div class="field full"><label>Sprint name *</label><input id="spName" placeholder="e.g. Sep 28 – Oct 2"></div>
+      <div class="field"><label>Start date (Mon)</label><input id="spStart" type="date"></div>
+      <div class="field"><label>End date (Fri)</label><input id="spEnd" type="date"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="danger" id="spDelete" type="button" hidden>Delete</button>
+      <span class="spacer"></span>
+      <button class="secondary" id="spCancel" type="button">Cancel</button>
+      <button class="primary" id="spSave" type="button">Save Sprint</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ END SPRINT MODAL ============ -->
+<div class="modal-back" id="endSprintModal">
+  <div class="modal small">
+    <h2>End sprint</h2>
+    <div class="sprint-sum" id="esSummary"></div>
+    <p class="hint" id="esUnfinished"></p>
+    <div class="modal-actions">
+      <button class="secondary" id="esCancel" type="button">Cancel</button>
+      <span class="spacer"></span>
+      <button class="secondary" id="esBacklog" type="button">Move unfinished to Backlog</button>
+      <button class="primary" id="esNext" type="button">Move to next sprint</button>
     </div>
   </div>
 </div>

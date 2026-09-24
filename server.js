@@ -118,8 +118,44 @@ function normTask(r) {
     recurHistory: safeJson(r.recur_history, []),
     loggedMinutes: Number(r.logged_minutes) || 0,
     spilled: Number(r.spilled) ? 1 : 0,
+    sprint_id: Number(r.sprint_id) || 0,
     position: Number(r.position),
   };
+}
+
+function normSprint(r) {
+  return {
+    id: Number(r.id),
+    name: r.name || 'Sprint',
+    start: r.start_date || '',
+    end: r.end_date || '',
+    status: r.status || 'future',
+    plannedHours: Math.round(((Number(r.planned_minutes) || 0) / 60) * 10) / 10,
+    actualHours: Math.round(((Number(r.actual_minutes) || 0) / 60) * 10) / 10,
+    spilled: Number(r.spilled_count) || 0,
+  };
+}
+
+async function activeSprintId() {
+  const r = await db.execute('SELECT active_sprint_id FROM settings WHERE id = 1');
+  return Number(r.rows[0]?.active_sprint_id) || 0;
+}
+
+async function setActiveSprint(id) {
+  await db.execute({ sql: 'UPDATE settings SET active_sprint_id = ? WHERE id = 1', args: [id] });
+}
+
+function defaultSprintName() {
+  return db.execute('SELECT COUNT(*) c FROM sprints')
+    .then((r) => `Sprint ${Number(r.rows[0].c) + 1}`);
+}
+
+function nextSprintDates(fromDate) {
+  const ref = new Date((fromDate || dateKey(new Date())) + 'T00:00:00');
+  const tomorrow = new Date(ref);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const mon = mondayOf(tomorrow);
+  return { start: dateKey(mon), end: dateKey(addDays(mon, 4)) };
 }
 
 async function loadUser(token) {
@@ -167,13 +203,22 @@ async function getSettings() {
   const r = await db.execute('SELECT * FROM settings WHERE id = 1');
   const s = r.rows[0];
   if (!s) return null;
+  const activeId = Number(s.active_sprint_id) || 0;
+  let current = null;
+  if (activeId) {
+    const sp = await db.execute({ sql: 'SELECT * FROM sprints WHERE id = ?', args: [activeId] });
+    current = sp.rows[0] || null;
+  }
+  const all = await db.execute('SELECT * FROM sprints ORDER BY id DESC LIMIT 200');
   return {
     workspace_name: s.workspace_name,
     board_name: s.board_name,
-    sprint_name: s.sprint_name,
-    sprint_start: s.sprint_start || '',
-    sprint_end: s.sprint_end || '',
-    sprint_active: Number(s.sprint_active) === 1,
+    sprint_name: (current && current.name) || s.sprint_name,
+    sprint_start: (current && current.start_date) || s.sprint_start || '',
+    sprint_end: (current && current.end_date) || s.sprint_end || '',
+    sprint_active: current ? String(current.status) === 'active' : false,
+    active_sprint_id: activeId,
+    sprints: all.rows.map(normSprint),
     departments: safeJson(s.departments, []),
     priorities: safeJson(s.priorities, []),
     invite_code: s.invite_code || '',
@@ -329,7 +374,8 @@ app.get('/api/board', auth, async (req, res, next) => {
       me: req.user,
       settings: s || {
         workspace_name: 'APPX Delivery', board_name: 'Task Board', sprint_name: '',
-        sprint_start: '', sprint_end: '', sprint_active: false, departments: [], priorities: [],
+        sprint_start: '', sprint_end: '', sprint_active: false, active_sprint_id: 0,
+        sprints: [], departments: [], priorities: [],
       },
       columns,
       tasks,
@@ -361,15 +407,18 @@ app.post('/api/tasks', auth, need('editor'), async (req, res, next) => {
       if (!chk.rows.length) return res.status(404).json({ error: 'Column not found' });
     }
     const mx = await db.execute({ sql: 'SELECT COALESCE(MAX(position), -1) m FROM tasks WHERE column_id = ?', args: [colId] });
+    const leftmost = (await db.execute('SELECT id FROM board_columns ORDER BY position, id LIMIT 1')).rows[0];
+    const sprintId = (leftmost && Number(leftmost.id) === colId) ? 0 : await activeSprintId();
     const r = await db.execute({
-      sql: `INSERT INTO tasks (column_id, title, assignee, department, priority, due, hours, outcome, acceptance, tags, custom_values, position, recur, logged_minutes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      sql: `INSERT INTO tasks (column_id, title, assignee, department, priority, due, hours, outcome, acceptance, tags, custom_values, position, recur, logged_minutes, sprint_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [
         colId, title, str(b.assignee, 60), str(b.department, 60), str(b.priority, 20) || 'Medium',
         str(b.due, 20), str(b.hours, 10), str(b.outcome, 3000), str(b.acceptance, 3000),
         JSON.stringify(numArr(b.tags)), JSON.stringify(obj(b.customValues)), Number(mx.rows[0].m) + 1,
         ['daily', 'weekly', 'monthly', 'quarterly', 'half', 'yearly'].includes(b.recur) ? b.recur : '',
         Math.max(0, Math.min(600000, Math.round(Number(b.loggedMinutes) || 0))),
+        sprintId,
       ],
     });
     const newId = Number(r.lastInsertRowid);
@@ -440,7 +489,14 @@ app.patch('/api/tasks/:id', auth, need('editor'), async (req, res, next) => {
         if (i >= 0) idx = i;
       }
       ids.splice(idx, 0, id);
-      await db.execute({ sql: "UPDATE tasks SET column_id = ?, updated_at = datetime('now') WHERE id = ?", args: [targetCol, id] });
+      const leftmost = (await db.execute('SELECT id FROM board_columns ORDER BY position, id LIMIT 1')).rows[0];
+      const leftId = leftmost ? Number(leftmost.id) : null;
+      let sprintId = Number(task.sprint_id) || 0;
+      if (leftId != null) {
+        if (targetCol === leftId) sprintId = 0;
+        else if (targetCol !== Number(task.column_id)) sprintId = await activeSprintId();
+      }
+      await db.execute({ sql: "UPDATE tasks SET column_id = ?, sprint_id = ?, updated_at = datetime('now') WHERE id = ?", args: [targetCol, sprintId, id] });
       await db.execute({ sql: "INSERT INTO task_moves (task_id, column_id, at) VALUES (?, ?, strftime('%s','now'))", args: [id, targetCol] });
       let i = 0;
       for (const tid of ids) {
@@ -461,7 +517,7 @@ app.patch('/api/tasks/:id', auth, need('editor'), async (req, res, next) => {
               args: [id, Number(bl.id)],
             });
             await db.execute({
-              sql: "UPDATE tasks SET column_id = ?, due = ?, recur_history = ?, spilled = 0, updated_at = datetime('now') WHERE id = ?",
+              sql: "UPDATE tasks SET column_id = ?, due = ?, recur_history = ?, spilled = 0, sprint_id = 0, updated_at = datetime('now') WHERE id = ?",
               args: [Number(bl.id), next, JSON.stringify(hist), id],
             });
             await renumber(Number(bl.id));
@@ -657,18 +713,20 @@ app.delete('/api/custom-fields/:id', auth, need('editor'), async (req, res, next
   } catch (e) { next(e); }
 });
 
-// ---------- settings ----------
-async function finalizeSprint(st) {
+// ---------- sprints ----------
+async function finalizeSprintById(sprintId, mode) {
+  const sprint = (await db.execute({ sql: 'SELECT * FROM sprints WHERE id = ?', args: [sprintId] })).rows[0];
+  if (!sprint) return;
   const doneCol = (await db.execute("SELECT id FROM board_columns WHERE stage='done' ORDER BY id LIMIT 1")).rows[0];
   const startCol = (await db.execute("SELECT id FROM board_columns WHERE stage='start' ORDER BY id LIMIT 1")).rows[0];
   const backlog = (await db.execute('SELECT id FROM board_columns ORDER BY position, id LIMIT 1')).rows[0];
   const doneId = doneCol ? Number(doneCol.id) : -1;
   const startId = startCol ? Number(startCol.id) : -1;
   const backlogId = backlog ? Number(backlog.id) : null;
-  const startSec = st.sprint_start ? Math.floor(new Date(st.sprint_start + 'T00:00:00Z').getTime() / 1000) : 0;
-  const endSec = st.sprint_end ? Math.floor(new Date(st.sprint_end + 'T00:00:00Z').getTime() / 1000) : Math.floor(Date.now() / 1000);
+  const startSec = sprint.start_date ? Math.floor(new Date(sprint.start_date + 'T00:00:00Z').getTime() / 1000) : 0;
+  const endSec = sprint.end_date ? Math.floor(new Date(sprint.end_date + 'T00:00:00Z').getTime() / 1000) : Math.floor(Date.now() / 1000);
 
-  const tasks = (await db.execute('SELECT * FROM tasks')).rows;
+  const rows = (await db.execute({ sql: 'SELECT * FROM tasks WHERE sprint_id = ?', args: [sprintId] })).rows;
   const moves = (await db.execute('SELECT task_id, column_id, at FROM task_moves ORDER BY task_id, at')).rows;
   const byTask = {};
   for (const m of moves) (byTask[Number(m.task_id)] ||= []).push({ col: Number(m.column_id), at: Number(m.at) });
@@ -676,7 +734,7 @@ async function finalizeSprint(st) {
   let planned = 0;
   let actual = 0;
   const unfinished = [];
-  for (const t of tasks) {
+  for (const t of rows) {
     const nt = normTask(t);
     planned += hoursInt(nt.hours) * 60;
     const mv = byTask[nt.id] || [];
@@ -694,31 +752,144 @@ async function finalizeSprint(st) {
       if (startedAt != null) actual += (doneAt - startedAt);
       actual += nt.loggedMinutes;
     }
-    if (doneId >= 0 && nt.column_id !== doneId) {
-      unfinished.push(nt);
-      if (backlogId != null) {
-        await db.execute({
-          sql: "INSERT INTO task_moves (task_id, column_id, at) VALUES (?, ?, strftime('%s','now'))",
-          args: [nt.id, backlogId],
-        });
-      }
-    }
+    if (doneId >= 0 && nt.column_id !== doneId) unfinished.push(nt);
   }
 
-  if (backlogId != null && doneId >= 0) {
-    await db.execute({
-      sql: "UPDATE tasks SET column_id = ?, spilled = 1, updated_at = datetime('now') WHERE column_id != ?",
-      args: [backlogId, doneId],
+  let nextId = 0;
+  if (mode === 'next') {
+    const cnt = await db.execute('SELECT COUNT(*) c FROM sprints');
+    const ds = nextSprintDates(sprint.end_date || sprint.start_date);
+    const ins = await db.execute({
+      sql: 'INSERT INTO sprints (name, start_date, end_date, status) VALUES (?,?,?,?)',
+      args: [`Sprint ${Number(cnt.rows[0].c) + 1}`, ds.start, ds.end, 'future'],
     });
-    await renumber(backlogId);
+    nextId = Number(ins.lastInsertRowid);
   }
+
+  for (const nt of unfinished) {
+    if (mode === 'next') {
+      await db.execute({
+        sql: "UPDATE tasks SET sprint_id = ?, spilled = 1, updated_at = datetime('now') WHERE id = ?",
+        args: [nextId, nt.id],
+      });
+    } else if (backlogId != null) {
+      await db.execute({
+        sql: "UPDATE tasks SET column_id = ?, sprint_id = 0, spilled = 1, updated_at = datetime('now') WHERE id = ?",
+        args: [backlogId, nt.id],
+      });
+      await db.execute({
+        sql: "INSERT INTO task_moves (task_id, column_id, at) VALUES (?, ?, strftime('%s','now'))",
+        args: [nt.id, backlogId],
+      });
+    }
+  }
+  if (mode !== 'next' && backlogId != null) await renumber(backlogId);
+
+  await db.execute({
+    sql: "UPDATE sprints SET status = 'complete', planned_minutes = ?, actual_minutes = ?, spilled_count = ? WHERE id = ?",
+    args: [planned, Math.round(actual), unfinished.length, sprintId],
+  });
+  await setActiveSprint(nextId);
 
   await db.execute({
     sql: 'INSERT INTO sprint_history (name, start_date, end_date, planned_minutes, actual_minutes, spilled_count) VALUES (?,?,?,?,?,?)',
-    args: [st.sprint_name || 'Sprint', st.sprint_start || '', st.sprint_end || '', planned, Math.round(actual), unfinished.length],
+    args: [sprint.name || 'Sprint', sprint.start_date || '', sprint.end_date || '', planned, Math.round(actual), unfinished.length],
   });
 }
 
+app.get('/api/sprints', auth, async (req, res, next) => {
+  try {
+    const r = await db.execute('SELECT * FROM sprints ORDER BY id');
+    res.json(r.rows.map(normSprint));
+  } catch (e) { next(e); }
+});
+
+app.post('/api/sprints', auth, need('editor'), async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const name = str(b.name, 60).trim();
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(String(b.start_date || '')) ? String(b.start_date) : '';
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(String(b.end_date || '')) ? String(b.end_date) : '';
+    const cnt = await db.execute('SELECT COUNT(*) c FROM sprints');
+    const finalName = name || `Sprint ${Number(cnt.rows[0].c) + 1}`;
+    const r = await db.execute({
+      sql: 'INSERT INTO sprints (name, start_date, end_date, status) VALUES (?,?,?,?)',
+      args: [finalName, start, end, 'future'],
+    });
+    await setActiveSprint(Number(r.lastInsertRowid));
+    bump();
+    res.status(201).json({ settings: await getSettings() });
+  } catch (e) { next(e); }
+});
+
+app.patch('/api/sprints/:id', auth, need('editor'), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const b = req.body || {};
+    const cur = (await db.execute({ sql: 'SELECT * FROM sprints WHERE id = ?', args: [id] })).rows[0];
+    if (!cur) return res.status(404).json({ error: 'Sprint not found' });
+    const sets = [];
+    const args = [];
+    const at = (col, val) => { sets.push(`${col} = ?`); args.push(val); };
+    if (b.name !== undefined) {
+      const n = str(b.name, 60).trim();
+      if (!n) return res.status(400).json({ error: 'Sprint name is required' });
+      at('name', n);
+    }
+    if (b.start_date !== undefined) at('start_date', /^\d{4}-\d{2}-\d{2}$/.test(String(b.start_date)) ? String(b.start_date) : '');
+    if (b.end_date !== undefined) at('end_date', /^\d{4}-\d{2}-\d{2}$/.test(String(b.end_date)) ? String(b.end_date) : '');
+    if (b.status !== undefined) {
+      const status = ['future', 'active'].includes(b.status) ? b.status : null;
+      if (status && status !== String(cur.status)) {
+        if (status === 'active') {
+          await db.execute("UPDATE sprints SET status = 'future' WHERE status = 'active'");
+          sets.push("status = 'active'");
+        } else if (String(cur.status) === 'active') {
+          return res.status(400).json({ error: 'End the current sprint before changing its status' });
+        } else {
+          at('status', status);
+        }
+      }
+    }
+    if (b.status === 'active' || b.select) await setActiveSprint(id);
+    if (sets.length) {
+      await db.execute({ sql: `UPDATE sprints SET ${sets.join(', ')} WHERE id = ?`, args: [...args, id] });
+    }
+    bump();
+    res.json({ settings: await getSettings() });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/sprints/:id/end', auth, need('editor'), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const cur = (await db.execute({ sql: 'SELECT * FROM sprints WHERE id = ?', args: [id] })).rows[0];
+    if (!cur) return res.status(404).json({ error: 'Sprint not found' });
+    if (String(cur.status) === 'complete') return res.status(400).json({ error: 'Sprint already ended' });
+    if (String(cur.status) !== 'active') return res.status(400).json({ error: 'Start the sprint before ending it' });
+    const mode = req.body?.unfinished === 'next' ? 'next' : 'backlog';
+    await finalizeSprintById(id, mode);
+    bump();
+    res.json({ settings: await getSettings() });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/sprints/:id', auth, need('editor'), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const cur = (await db.execute({ sql: 'SELECT * FROM sprints WHERE id = ?', args: [id] })).rows[0];
+    if (!cur) return res.status(404).json({ error: 'Sprint not found' });
+    if (String(cur.status) === 'complete') return res.status(400).json({ error: 'Ended sprints are kept for history' });
+    if (String(cur.status) === 'active') return res.status(400).json({ error: 'End the sprint first' });
+    await db.execute({ sql: 'UPDATE tasks SET sprint_id = 0 WHERE sprint_id = ?', args: [id] });
+    await db.execute({ sql: 'DELETE FROM sprints WHERE id = ?', args: [id] });
+    if ((await activeSprintId()) === id) await setActiveSprint(0);
+    bump();
+    res.json({ settings: await getSettings() });
+  } catch (e) { next(e); }
+});
+
+// ---------- settings ----------
 app.patch('/api/settings', auth, need('editor'), async (req, res, next) => {
   try {
     const b = req.body || {};
@@ -754,12 +925,18 @@ app.patch('/api/settings', auth, need('editor'), async (req, res, next) => {
       sets.push('work_hours_per_day = ?');
       args.push(String(n));
     }
-    let before = null;
-    if (b.sprint_active !== undefined && b.sprint_active === false) before = await getSettings();
+    let finalizeAfter = 0;
+    if (b.sprint_active !== undefined && b.sprint_active === false) {
+      const aid = await activeSprintId();
+      if (aid > 0) {
+        const sp = (await db.execute({ sql: 'SELECT * FROM sprints WHERE id = ?', args: [aid] })).rows[0];
+        if (sp && String(sp.status) === 'active') finalizeAfter = aid;
+      }
+    }
     if (sets.length) {
       await db.execute({ sql: `UPDATE settings SET ${sets.join(', ')} WHERE id = 1`, args });
     }
-    if (before && before.sprint_active) await finalizeSprint(before);
+    if (finalizeAfter) await finalizeSprintById(finalizeAfter, 'backlog');
     bump();
     res.json({ settings: await getSettings() });
   } catch (e) { next(e); }
@@ -828,7 +1005,7 @@ app.get('/api/reports', auth, async (req, res, next) => {
     const members = (await db.execute('SELECT * FROM users ORDER BY username COLLATE NOCASE')).rows;
     const columns = (await db.execute('SELECT * FROM board_columns ORDER BY position, id')).rows;
     const tasks = (await db.execute('SELECT * FROM tasks')).rows.map(normTask);
-    const sprints = (await db.execute('SELECT * FROM sprint_history ORDER BY id DESC LIMIT 20')).rows;
+    const sprints = (await db.execute("SELECT * FROM sprints WHERE status = 'complete' ORDER BY id DESC LIMIT 20")).rows;
 
     const holidays = st.holidays || [];
     const wh = st.work_hours_per_day || 6;

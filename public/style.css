@@ -241,3 +241,28 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .timelive{background:#16324f;color:#9fd3ff;font-weight:650}
 .dept-input{width:106px;min-width:0;padding:7px 8px;border:1px solid var(--line2);border-radius:8px;background:#fff}
 .notice{font-size:12px;color:#b57a13;background:#fff6e6;border:1px solid #f3dfb6;border-radius:8px;padding:8px 10px;margin:6px 0}
+
+/* ---------- sprints ---------- */
+.sprint-group{display:flex;align-items:center;gap:7px;background:var(--purple-soft);border:1px solid var(--purple-border);border-radius:8px;padding:6px 6px 6px 11px}
+.sprint-label{font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--purple-ink)}
+.sprint-select{border:none;background:transparent;color:var(--purple-ink);font-size:12.5px;font-weight:700;max-width:150px;outline:none;cursor:pointer}
+.sprint-add{color:var(--purple-ink);padding:4px 7px;font-size:14px}
+.sprint-add:hover{background:#e1dbfa}
+.sp-chip{background:var(--purple-soft);color:var(--purple-ink);font-weight:650}
+.sprint-sum{font-size:13px;color:#505461;background:var(--col-bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;line-height:1.9}
+@media(max-width:640px){.sprint-group .sprint-label{display:none}.sprint-select{max-width:104px}}
+
+/* ---------- sprint calendar (Mon–Fri) ---------- */
+.cal-week-days{display:grid;grid-template-columns:repeat(5,1fr);min-width:560px}
+.cal-day{border-right:1px solid var(--line);min-height:120px}
+.cal-day:last-child{border-right:none}
+.cal-day-full{border:none}
+.cal-day-head{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:11.5px;padding:7px 9px;background:var(--col-bg);color:#5f6471;border-bottom:1px solid var(--line)}
+.cal-day-head i{font-style:normal;font-weight:600;color:var(--muted);font-size:10.5px}
+.cal-today .cal-day-head{background:var(--purple);color:#fff}
+.cal-today .cal-day-head i{color:#e7e2ff}
+.cal-day .cal-task{display:block;padding:6px 9px;font-size:12px;cursor:pointer;border:none;border-bottom:1px solid var(--line)}
+.cal-day .cal-task:last-child{border-bottom:none}
+.cal-day .cal-task b{display:block;font-size:12px;line-height:1.35}
+.cal-day .cal-task .rm{font-size:10.5px;color:var(--muted);display:block}
+.cal-week .cal-week-days{overflow-x:auto}

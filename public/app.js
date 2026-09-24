@@ -16,6 +16,7 @@ let draftDepts = [];
 let draftPris = [];
 let redrawSettingsLists = null;
 let authMode = 'login';
+let editingSprintId = null;
 
 /* ---------- helpers ---------- */
 function esc(s) {
@@ -25,6 +26,11 @@ function esc(s) {
 }
 function initials(n) {
   return (n || '').split(/\s+/).map((x) => x[0]).join('').slice(0, 2).toUpperCase() || '?';
+}
+function addDays(d, n) {
+  const x = new Date(d.getTime());
+  x.setDate(x.getDate() + n);
+  return x;
 }
 function canEdit() { return !!board && board.me.role !== 'viewer'; }
 function isAdmin() { return !!board && board.me.role === 'admin'; }
@@ -93,14 +99,15 @@ function renderAll() {
   const s = board.settings;
   $('wsName').textContent = s.workspace_name;
   $('boardTitle').textContent = s.board_name;
-  $('sprintName').textContent = s.sprint_name || '—';
-  $('btnSprint').textContent = s.sprint_active ? 'End Sprint' : 'Start Sprint';
   $('whoami').innerHTML = esc(board.me.username) + `<span class="role-chip">${esc(board.me.role)}</span>`;
   $('btnNewTask').hidden = !canEdit();
+  $('btnNewSprint').hidden = !canEdit();
   $('btnSprint').hidden = !canEdit();
+  $('btnSprintEdit').hidden = !canEdit();
   $('navSettings').hidden = !canEdit();
   $('navLabels').hidden = !canEdit();
   $('navMembers').hidden = !isAdmin();
+  renderSprintControl();
   fillFilters();
   renderStats();
   renderCapacity();
@@ -194,6 +201,10 @@ function cardHtml(t) {
   const prio = (t.priority || '').toLowerCase();
   const prioClass = ['high', 'medium', 'low'].includes(prio) ? ' ' + prio : '';
   let chips = t.spilled ? '<span class="tag spilled-chip" title="Carried over from a previous sprint">SPILLED</span>' : '';
+  if (t.sprint_id) {
+    const cs = (board.settings.sprints || []).find((s2) => s2.id === t.sprint_id);
+    if (cs) chips += `<span class="tag sp-chip" title="Planned in ${esc(cs.name)}">${esc(cs.name)}</span>`;
+  }
   chips += `<span class="tag${prioClass}">${esc(t.priority || '—')}</span>`;
   if (t.department) chips += `<span class="tag">${esc(t.department)}</span>`;
   if (t.hours) chips += `<span class="tag">${esc(t.hours)}</span>`;
@@ -707,9 +718,6 @@ function openSettings() {
   const s = board.settings;
   $('sWorkspace').value = s.workspace_name;
   $('sBoard').value = s.board_name;
-  $('sSprint').value = s.sprint_name;
-  $('sStart').value = s.sprint_start;
-  $('sEnd').value = s.sprint_end;
   $('sHrsDay').value = s.work_hours_per_day || 6;
   draftDepts = [...s.departments];
   draftPris = [...s.priorities];
@@ -737,9 +745,6 @@ async function saveSettings() {
       body: {
         workspace_name: $('sWorkspace').value.trim(),
         board_name: $('sBoard').value.trim(),
-        sprint_name: $('sSprint').value.trim(),
-        sprint_start: $('sStart').value,
-        sprint_end: $('sEnd').value,
         work_hours_per_day: Math.max(1, Math.min(24, Number($('sHrsDay').value) || 6)),
         departments: draftDepts,
         priorities: draftPris,
@@ -1092,33 +1097,48 @@ function calTaskHtml(t, idx) {
 
 function renderCalendar() {
   const todayMonday = mondayOf(new Date());
-  const grouped = new Map();
+  const weeksMap = new Map();
+  const getWeek = (mon) => {
+    const k = dayKey(mon);
+    if (!weeksMap.has(k)) weeksMap.set(k, { mon, days: {} });
+    return weeksMap.get(k);
+  };
+  getWeek(todayMonday);
   const unscheduled = [];
   for (const t of board.tasks) {
     if (!t.due) { unscheduled.push(t); continue; }
-    const mon = mondayOf(t.due);
-    const key = dayKey(mon);
-    if (!grouped.has(key)) grouped.set(key, { mon, tasks: [] });
-    grouped.get(key).tasks.push(t);
+    const w = getWeek(mondayOf(t.due));
+    (w.days[t.due] = w.days[t.due] || []).push(t);
   }
-  const weeks = [...grouped.values()].sort((a, b) => a.mon - b.mon);
+  const weeks = [...weeksMap.values()].sort((a, b) => a.mon - b.mon);
 
   const curr = new Date();
   $('calRange').textContent = 'Today: ' + curr.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 
   let html = weeks.map((w) => {
-    const sun = new Date(w.mon);
-    sun.setDate(sun.getDate() + 6);
     const cur = w.mon.getTime() === todayMonday.getTime();
-    const hrs = Math.round(w.tasks.reduce((s, t) => s + hoursOf(t), 0) * 10) / 10;
-    const tasks = [...w.tasks].sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
+    const hrs = Math.round(Object.keys(w.days).reduce((s, k) => s + w.days[k].reduce((a, t) => a + hoursOf(t), 0), 0) * 10) / 10;
+    let cells = '';
+    for (let i = 0; i < 5; i++) {
+      const d = addDays(w.mon, i);
+      const k = dayKey(d);
+      const tasks = (w.days[k] || []).slice().sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
+      const today = k === dayKey(curr);
+      const dayHrs = Math.round(tasks.reduce((s, t) => s + hoursOf(t), 0) * 10) / 10;
+      cells += `<div class="cal-day${today ? ' cal-today' : ''}">
+        <div class="cal-day-head">${fmtWeekDay(d)}<i>${tasks.length ? fmtFull(dayHrs) : ''}</i></div>
+        ${tasks.length ? tasks.map((t) =>
+          `<div class="cal-task" data-id="${t.id}" title="${esc(t.title)}"><b>${esc(t.title)}</b><span class="rm">${t.assignee ? esc(t.assignee) : ''}${t.hours ? ' · ' + esc(t.hours) : ''}</span></div>`
+        ).join('') : '<div class="cal-empty">—</div>'}
+      </div>`;
+    }
     return `<div class="cal-week${cur ? ' cal-current' : ''}">
       <div class="cal-week-head">
-        <span>${fmtWeekDay(w.mon)} – ${fmtWeekDay(sun)}</span>
+        <span><b>${fmtWeekDay(w.mon)}</b> – ${fmtWeekDay(addDays(w.mon, 4))} · Mon–Fri</span>
         <span class="cal-w">W${isoWeekNo(w.mon)}</span>
         <span class="cal-h">${fmtFull(hrs)}</span>
       </div>
-      ${tasks.map((t, i) => calTaskHtml(t, i + 1)).join('')}
+      <div class="cal-week-days">${cells}</div>
     </div>`;
   }).join('');
 
@@ -1126,11 +1146,15 @@ function renderCalendar() {
     const hrs = Math.round(unscheduled.reduce((s, t) => s + hoursOf(t), 0) * 10) / 10;
     html += `<div class="cal-week">
       <div class="cal-week-head"><span>Unscheduled</span><span class="cal-h">${fmtFull(hrs)}</span></div>
-      ${unscheduled.map((t, i) => calTaskHtml(t, '•')).join('')}
+      <div class="cal-week-days">
+        <div class="cal-day cal-day-full">${unscheduled.map((t) =>
+          `<div class="cal-task" data-id="${t.id}" title="${esc(t.title)}"><b>${esc(t.title)}</b><span class="rm">${t.assignee ? esc(t.assignee) : ''}${t.hours ? ' · ' + esc(t.hours) : ''}</span></div>`).join('')}
+        </div>
+      </div>
     </div>`;
   }
 
-  if (!html) html = '<div class="cal-empty">No tasks yet — add tasks with a due date to plan week-wise.</div>';
+  if (!html) html = '<div class="cal-empty">No tasks yet — add tasks with a due date to plan week-wise (Mon–Fri).</div>';
   $('calWeeks').innerHTML = html;
   $('calWeeks').querySelectorAll('.cal-task').forEach((el) => {
     el.onclick = () => {
@@ -1140,14 +1164,145 @@ function renderCalendar() {
   });
 }
 
-/* ---------- sprint ---------- */
-async function toggleSprint() {
+/* ---------- sprints ---------- */
+function currentSprint() {
+  const id = Number($('sprintSelect').value) || 0;
+  return (board.settings.sprints || []).find((s2) => s2.id === id) || null;
+}
+
+let applyTimer = null;
+function applyActive(id) {
+  clearTimeout(applyTimer);
+  applyTimer = setTimeout(() => {
+    api(`/api/sprints/${id}`, { method: 'PATCH', body: { select: true } })
+      .then(() => loadBoard())
+      .catch((e) => toast(e.message, true));
+  }, 400);
+}
+
+function renderSprintControl() {
+  const sprints = board.settings.sprints || [];
+  const active = Number(board.settings.active_sprint_id) || 0;
+  let cur = Number($('sprintSelect').value) || 0;
+  if (!sprints.some((s2) => s2.id === cur)) {
+    const pick = sprints.find((s2) => s2.id === active)
+      || sprints.find((s2) => s2.status !== 'complete')
+      || sprints[0];
+    cur = pick ? pick.id : 0;
+  }
+  $('sprintSelect').innerHTML = sprints.length
+    ? sprints.map((s2) => `<option value="${s2.id}"${s2.id === cur ? ' selected' : ''}>${esc(s2.name)}${s2.status === 'complete' ? ' ✓' : s2.status === 'active' ? ' ●' : ''}</option>`).join('')
+    : '<option value="0">No sprint yet</option>';
+  const sp = sprints.find((s2) => s2.id === cur) || null;
+  const btn = $('btnSprint');
+  btn.textContent = !sp ? 'New Sprint'
+    : sp.status === 'active' ? 'End Sprint'
+    : sp.status === 'complete' ? 'New Sprint'
+    : 'Start Sprint';
+  btn.disabled = false;
+  $('btnSprintEdit').hidden = !canEdit() || !sp || !!$('btnNewSprint').hidden;
+  if (!$('btnNewSprint').hidden && !active && sp) applyActive(sp.id);
+}
+
+function selectSprint(id) {
+  api(`/api/sprints/${id}`, { method: 'PATCH', body: { select: true } })
+    .then(() => { toast('Sprint selected'); return loadBoard(); })
+    .catch((e) => toast(e.message, true));
+}
+
+function defaultSprintDates() {
+  const mon = mondayOf(new Date());
+  mon.setDate(mon.getDate() + 7);
+  return { start: dayKey(mon), end: dayKey(addDays(mon, 4)) };
+}
+
+function openSprintModal(sp) {
   if (!canEdit()) return;
-  const on = !board.settings.sprint_active;
+  editingSprintId = sp ? sp.id : null;
+  $('sprintModalTitle').textContent = sp ? 'Edit Sprint' : 'New Sprint';
+  $('spDelete').hidden = !sp || sp.status === 'complete';
+  $('spName').value = sp ? sp.name : '';
+  const dts = sp ? { start: sp.start, end: sp.end } : defaultSprintDates();
+  $('spStart').value = dts.start;
+  $('spEnd').value = dts.end;
+  openModal('sprintModal');
+  $('spName').focus();
+}
+
+async function saveSprint() {
+  const name = $('spName').value.trim();
+  if (!name) { toast('Sprint name is required', true); return; }
+  const body = { name, start_date: $('spStart').value, end_date: $('spEnd').value };
   try {
-    await api('/api/settings', { method: 'PATCH', body: { sprint_active: on } });
+    if (editingSprintId != null) {
+      await api(`/api/sprints/${editingSprintId}`, { method: 'PATCH', body });
+    } else {
+      await api('/api/sprints', { method: 'POST', body });
+    }
+    closeModal('sprintModal');
+    toast('Sprint saved');
     await loadBoard();
-    toast(on ? 'Sprint started' : 'Sprint ended');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteSprint() {
+  if (editingSprintId == null) return;
+  if (!confirm('Delete this sprint? Its tasks will go back to the Backlog.')) return;
+  try {
+    await api(`/api/sprints/${editingSprintId}`, { method: 'DELETE' });
+    closeModal('sprintModal');
+    toast('Sprint deleted');
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function sprintAction() {
+  if (!canEdit()) return;
+  const sp = currentSprint();
+  if (sp && sp.status === 'active') { openEndSprint(sp); return; }
+  if (sp && sp.status === 'future') {
+    try {
+      await api(`/api/sprints/${sp.id}`, { method: 'PATCH', body: { status: 'active' } });
+      toast('Sprint started');
+      await loadBoard();
+    } catch (e) { toast(e.message, true); }
+    return;
+  }
+  openSprintModal(null);
+}
+
+function openEndSprint(sp) {
+  const doneCol = board.columns.find((c) => c.stage === 'done');
+  const doneId = doneCol ? doneCol.id : -1;
+  const spTasks = board.tasks.filter((t) => t.sprint_id === sp.id);
+  const done = spTasks.filter((t) => t.column_id === doneId).length;
+  const un = spTasks.length - done;
+  const planned = Math.round(spTasks.reduce((s, t) => s + hoursOf(t), 0) * 10) / 10;
+  $('esSummary').innerHTML = `Sprint <b>${esc(sp.name)}</b> ·
+    <span class="week-pill">${done} done</span>
+    <span class="week-pill">${un} open</span>
+    <span class="week-pill">${fmtFull(planned)} planned</span>`;
+  $('esUnfinished').textContent = un > 0
+    ? 'Open tasks will carry over as SPILLED. Move them to the next sprint (they stay in their columns) or back to the Backlog.'
+    : 'No open tasks in this sprint. End to record it in history.';
+  $('esBacklog').hidden = un <= 0;
+  if (un <= 0) {
+    $('esNext').textContent = 'End sprint';
+  } else {
+    $('esNext').textContent = 'Move to next sprint';
+  }
+  window.__endSprintId = sp.id;
+  openModal('endSprintModal');
+}
+
+async function endSprint(mode) {
+  const id = window.__endSprintId;
+  if (!id) return;
+  try {
+    await api(`/api/sprints/${id}/end`, { method: 'POST', body: { unfinished: mode } });
+    closeModal('endSprintModal');
+    toast(mode === 'next' ? 'Sprint ended — open tasks moved to the next sprint' : 'Sprint ended — open tasks moved back to the Backlog');
+    await loadBoard();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -1236,7 +1391,19 @@ function bindEvents() {
   };
   $('mDept').onchange = () => fillAssigneeList($('mDept').value);
   $('btnNewTask').onclick = () => openTaskNew(null);
-  $('btnSprint').onclick = toggleSprint;
+  $('btnNewSprint').onclick = () => openSprintModal(null);
+  $('sprintSelect').onchange = () => {
+    const v = Number($('sprintSelect').value);
+    if (v) selectSprint(v);
+  };
+  $('btnSprint').onclick = sprintAction;
+  $('btnSprintEdit').onclick = () => { const sp = currentSprint(); if (sp) openSprintModal(sp); };
+  $('spSave').onclick = saveSprint;
+  $('spCancel').onclick = () => closeModal('sprintModal');
+  $('spDelete').onclick = deleteSprint;
+  $('esNext').onclick = () => endSprint('next');
+  $('esBacklog').onclick = () => endSprint('backlog');
+  $('esCancel').onclick = () => closeModal('endSprintModal');
   $('btnClear').onclick = () => {
     $('search').value = '';
     $('fAssignee').value = '';
