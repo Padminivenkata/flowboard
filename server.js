@@ -299,6 +299,9 @@ app.post('/api/auth/login', async (req, res, next) => {
     if (!u || !(await bcrypt.compare(password, u.password_hash))) {
       return res.status(400).json({ error: 'Wrong username or password' });
     }
+    if (Number(u.is_active) === 0) {
+      return res.status(403).json({ error: 'This account is disabled. Contact the admin.' });
+    }
     attempts.delete('login:' + req.ip);
     const user = { id: Number(u.id), username: u.username, role: u.role };
     setToken(req, res, user.id);
@@ -318,6 +321,12 @@ const hoursInt = (h) => {
   const n = parseFloat(String(h || '').replace(/[^0-9.]/g, ''));
   return Number.isFinite(n) ? n : 0;
 };
+const dailyCapOf = (m, wh) => {
+  const d = Number(m.daily_capacity) || 0;
+  if (d > 0) return d;
+  const cap = Number(m.capacity) || 0;
+  return cap > 0 ? cap / 5 : wh;
+};
 
 app.get('/api/board', auth, async (req, res, next) => {
   try {
@@ -327,7 +336,7 @@ app.get('/api/board', auth, async (req, res, next) => {
       db.execute('SELECT * FROM tasks ORDER BY position, id'),
       db.execute('SELECT * FROM tags ORDER BY name COLLATE NOCASE'),
       db.execute('SELECT * FROM custom_fields ORDER BY position, id'),
-      db.execute('SELECT id, username, role, capacity, department FROM users ORDER BY username COLLATE NOCASE'),
+      db.execute('SELECT * FROM users ORDER BY username COLLATE NOCASE'),
       db.execute('SELECT * FROM task_moves ORDER BY at, id'),
     ]);
 
@@ -365,10 +374,12 @@ app.get('/api/board', auth, async (req, res, next) => {
       return task;
     });
 
+    const wh = Number((s || {}).work_hours_per_day) || 6;
     const capacity = m.rows.map((u) => ({
       id: Number(u.id), username: u.username, role: u.role,
-      capacity: Number(u.capacity) || 0,
+      capacity: Math.round(dailyCapOf(u, wh) * 5 * 10) / 10,
       department: u.department || '',
+      dailyCap: dailyCapOf(u, wh),
       workload: Math.round(tasks
         .filter((t) => t.assignee === u.username && (!doneCol || t.column_id !== doneCol.id))
         .reduce((s2, t) => s2 + hoursInt(t.hours), 0) * 10) / 10,
@@ -397,7 +408,12 @@ app.get('/api/board', auth, async (req, res, next) => {
         id: Number(r.id), name: r.name, type: r.type,
         options: safeJson(r.options, []), position: Number(r.position),
       })),
-      members: m.rows.map((r) => ({ id: Number(r.id), username: r.username, role: r.role, capacity: Number(r.capacity) || 0, department: r.department || '' })),
+      members: m.rows.map((r) => ({
+        id: Number(r.id), username: r.username, role: r.role, capacity: Number(r.capacity) || 0,
+        dailyCap: dailyCapOf(r, wh), department: r.department || '',
+        employeeId: r.employee_id || '', title: r.title || '', manager: r.manager || '',
+        isActive: Number(r.is_active) === 1,
+      })),
       capacity,
       stats,
     });
@@ -1011,6 +1027,123 @@ app.patch('/api/members/:id/department', auth, need('admin'), async (req, res, n
   } catch (e) { next(e); }
 });
 
+// ---------- employees (the team sheet) ----------
+app.get('/api/employees', auth, async (req, res, next) => {
+  try {
+    const st = await getSettings();
+    const wh = Number(st.work_hours_per_day) || 6;
+    const [columns, users, tasks] = await Promise.all([
+      db.execute('SELECT * FROM board_columns ORDER BY position, id'),
+      db.execute('SELECT * FROM users ORDER BY department COLLATE NOCASE, username COLLATE NOCASE'),
+      db.execute('SELECT * FROM tasks'),
+    ]);
+    const doneId = columns.rows.find((c) => c.stage === 'done');
+    const doneColId = doneId ? Number(doneId.id) : -1;
+    const thisWeek = mondayOf(dateKey(new Date()));
+    const workDays = Math.max(0, 5 - holidaysInWeek(thisWeek, st.holidays || []).length);
+    const rows = users.rows.map((u) => {
+      const daily = dailyCapOf(u, wh);
+      const weeklyCap = Math.round(daily * workDays * 10) / 10;
+      const workload = Math.round(tasks.rows
+        .filter((t) => t.assignee === u.username && (!doneId || Number(t.column_id) !== doneColId))
+        .reduce((s, t) => s + hoursInt(t.hours), 0) * 10) / 10;
+      const available = Math.round(Math.max(0, weeklyCap - workload) * 10) / 10;
+      const utilization = weeklyCap > 0 ? Math.round((workload / weeklyCap) * 100) : 0;
+      return {
+        id: Number(u.id),
+        employeeId: u.employee_id || '',
+        name: u.username,
+        department: u.department || '',
+        title: u.title || '',
+        manager: u.manager || '',
+        dailyCap: Math.round(daily * 10) / 10,
+        weeklyCap,
+        workload,
+        available,
+        utilization,
+        isActive: Number(u.is_active) === 1,
+        over: utilization > 100,
+      };
+    });
+    const totals = rows.reduce((acc, r) => {
+      if (r.isActive) {
+        acc.people++;
+        acc.capacity += r.weeklyCap;
+        acc.workload += r.workload;
+        acc.available += r.available;
+      }
+      return acc;
+    }, { people: 0, capacity: 0, workload: 0, available: 0 });
+    totals.available = Math.round(totals.available * 10) / 10;
+    totals.utilization = totals.capacity > 0 ? Math.round((totals.workload / totals.capacity) * 100) : 0;
+    res.json({ rows, totals, departments: st.departments || [], workDays });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/employees', auth, need('admin'), async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const name = str(b.name, 60).trim();
+    if (name.length < 2) return res.status(400).json({ error: 'Employee name is required' });
+    const exists = await db.execute({ sql: 'SELECT 1 FROM users WHERE username = ? COLLATE NOCASE', args: [name] });
+    if (exists.rows.length) return res.status(400).json({ error: 'An account with this name already exists' });
+    let password = String(b.password || '');
+    let generated = false;
+    if (password.length < 8) {
+      password = `Emp@${Math.floor(1000 + Math.random() * 9000)}${name.length ? name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3) : ''}`;
+      generated = true;
+    }
+    if (!validPassword(password)) return res.status(400).json({ error: 'Password must be 8+ characters with a letter and a number' });
+    const hash = await bcrypt.hash(password, 10);
+    const daily = Math.max(0, Math.min(24, Number(b.dailyCapacity) || 0));
+    const r = await db.execute({
+      sql: `INSERT INTO users (username, password_hash, role, department, capacity, employee_id, title, manager, daily_capacity, is_active)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      args: [
+        name, hash, 'editor', str(b.department, 60), 0,
+        str(b.employeeId, 40), str(b.title, 60), str(b.manager, 60),
+        daily, b.isActive === false ? 0 : 1,
+      ],
+    });
+    bump();
+    res.status(201).json({ id: Number(r.lastInsertRowid), password, generated });
+  } catch (e) { next(e); }
+});
+
+app.patch('/api/employees/:id', auth, need('admin'), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const cur = (await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [id] })).rows[0];
+    if (!cur) return res.status(404).json({ error: 'Employee not found' });
+    const b = req.body || {};
+    const sets = [];
+    const args = [];
+    const put = (col, val) => { sets.push(`${col} = ?`); args.push(val); };
+    if (b.employeeId !== undefined) put('employee_id', str(b.employeeId, 40));
+    if (b.title !== undefined) put('title', str(b.title, 60));
+    if (b.manager !== undefined) put('manager', str(b.manager, 60));
+    if (b.department !== undefined) put('department', str(b.department, 60));
+    if (b.daily_capacity !== undefined) put('daily_capacity', Math.max(0, Math.min(24, Number(b.daily_capacity) || 0)));
+    if (b.is_active !== undefined) put('is_active', b.is_active ? 1 : 0);
+    if (b.name !== undefined) {
+      const nn = str(b.name, 60).trim();
+      if (!nn) return res.status(400).json({ error: 'Name is required' });
+      const dup = await db.execute({ sql: 'SELECT 1 FROM users WHERE username = ? COLLATE NOCASE AND id != ?', args: [nn, id] });
+      if (dup.rows.length) return res.status(400).json({ error: 'Another account already uses this name' });
+      const old = String(cur.username);
+      if (nn !== old) {
+        put('username', nn);
+        await db.execute({ sql: 'UPDATE tasks SET assignee = ? WHERE assignee = ?', args: [nn, old] });
+      }
+    }
+    if (sets.length) {
+      await db.execute({ sql: `UPDATE users SET ${sets.join(', ')} WHERE id = ?`, args: [...args, id] });
+    }
+    bump();
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // ---------- reports ----------
 app.get('/api/reports', auth, async (req, res, next) => {
   try {
@@ -1044,7 +1177,7 @@ app.get('/api/reports', auth, async (req, res, next) => {
     for (const m of members) {
       const cap = Number(m.capacity) || 0;
       const dep = (m.department || '').trim() || 'Unassigned';
-      memberCaps.set(m.username, { id: Number(m.id), dept: dep, cap });
+      memberCaps.set(m.username, { id: Number(m.id), dept: dep, cap, daily: Number(m.daily_capacity) || 0 });
       deptResCount.set(dep, (deptResCount.get(dep) || 0) + 1);
     }
 
@@ -1058,8 +1191,8 @@ app.get('/api/reports', auth, async (req, res, next) => {
       const info = memberCaps.get(m.username);
       const h = holidaysInWeek(mondayOf(key), holidays).length;
       const days = Math.max(0, workDays - h);
-      const base = days * wh;
-      return info && info.cap > 0 ? info.cap : base;
+      const daily = info && info.daily > 0 ? info.daily : (info && info.cap > 0 ? info.cap / workDays : wh);
+      return Math.round(daily * days * 10) / 10;
     };
 
     const depts = new Map();
@@ -1137,8 +1270,7 @@ app.get('/api/reports', auth, async (req, res, next) => {
       const usedHours = inSprint.reduce((acc, t) => acc + hoursInt(t.hours), 0);
       const wd = workingDaysBetween(s.start_date, s.end_date, holidays);
       const dailyRateOf = (m) => {
-        const cap = Number(m.capacity) || 0;
-        return cap > 0 ? cap / workDays : wh;
+        return dailyCapOf(m, wh);
       };
       const capByName = new Map();
       let capacityHours = 0;

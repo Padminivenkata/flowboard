@@ -321,6 +321,23 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 .sr-pill-complete{background:#e8f5ee;color:#26855f}
 .sr-pill-active{background:var(--purple-soft);color:var(--purple-ink)}
 .sr-pill-future{background:var(--col-bg);color:var(--muted)}
+/* ---------- employees (team sheet) ---------- */
+.rep-scroll.tall{max-height:52vh}
+.emp-summary{display:flex;gap:8px;flex-wrap:wrap}
+.emp-sum{background:var(--col-bg);border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:110px}
+.emp-sum b{display:block;font-size:16px}
+.emp-sum span{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+.emp-sum.rm b{font-size:14px}
+.emp-in{padding:6px 7px;border:1px solid var(--line2);border-radius:8px;background:#fff;font-size:12.5px;color:var(--ink);width:100%;min-width:70px}
+.emp-in:focus{border-color:var(--purple);outline:none}
+.emp-id{font-family:Consolas,ui-monospace,monospace;min-width:92px;text-transform:uppercase}
+.emp-num{width:66px}
+.emp-flag{white-space:nowrap}
+.emp-flag .on{color:#26855f;font-weight:750}
+.emp-flag .off{color:var(--muted)}
+.emp-active{accent-color:var(--purple);width:15px;height:15px;vertical-align:-2px;margin-right:4px;cursor:pointer}
+.inactive-row{opacity:.45}
+
 @media print{
   body *{visibility:hidden !important}
   #reportsModal,#reportsModal *{visibility:visible !important}

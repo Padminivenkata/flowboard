@@ -160,6 +160,15 @@ export async function initDb() {
   if (!ucols.rows.some((r) => r.name === 'department')) {
     await db.execute("ALTER TABLE users ADD COLUMN department TEXT NOT NULL DEFAULT ''");
   }
+  const eucols = await db.execute('PRAGMA table_info(users)');
+  const addU = async (col, def) => {
+    if (!eucols.rows.some((r) => r.name === col)) await db.execute(`ALTER TABLE users ADD COLUMN ${col} ${def}`);
+  };
+  await addU('employee_id', "TEXT NOT NULL DEFAULT ''");
+  await addU('title', "TEXT NOT NULL DEFAULT ''");
+  await addU('manager', "TEXT NOT NULL DEFAULT ''");
+  await addU('daily_capacity', 'REAL NOT NULL DEFAULT 0');
+  await addU('is_active', 'INTEGER NOT NULL DEFAULT 1');
   const ccols = await db.execute('PRAGMA table_info(board_columns)');
   if (!ccols.rows.some((r) => r.name === 'stage')) {
     await db.execute("ALTER TABLE board_columns ADD COLUMN stage TEXT NOT NULL DEFAULT 'normal'");

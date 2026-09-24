@@ -45,6 +45,7 @@
       <button id="navSettings">⚙ Board Settings</button>
       <button id="navLabels">⌗ Tags &amp; Fields</button>
       <button id="navMembers" hidden>☺ Members</button>
+      <button id="navEmployees">☷ Employees</button>
     </nav>
     <div class="side-bottom">
       <div id="whoami"></div>
@@ -272,6 +273,52 @@
     <p class="hint">Capacity = team member&apos;s available <b>hours per sprint</b>. Workload is the sum of hours on their open tasks. Admins can set each member&apos;s capacity in the list above.</p>
     <div class="modal-actions">
       <button class="secondary" id="memClose" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ EMPLOYEES MODAL (team sheet) ============ -->
+<div class="modal-back" id="employeesModal">
+  <div class="modal wide tall">
+    <h2>Employees <span class="cal-range" id="empRange"></span></h2>
+    <p class="hint">This is your live team sheet. Edit the white fields (Employee ID, Department, Role, Manager, Daily capacity, Active) — the grey columns <b>Capacity/wk, Workload, Available, Util</b> update automatically from your tasks &amp; time tracking.</p>
+    <div class="emp-summary" id="empSummary"></div>
+    <div class="sr-head" style="margin:12px 0 6px">
+      <span></span>
+      <span class="sr-ctrl">
+        <button class="primary" id="empAdd" type="button">+ Add employee</button>
+      </span>
+    </div>
+    <div class="rep-scroll tall"><table class="rep-table" id="empTable">
+      <thead><tr>
+        <th>Emp ID</th><th>Employee</th><th>Department</th><th>Role</th><th>Manager</th>
+        <th>Daily h</th><th>Cap/wk</th><th>Workload</th><th>Avail</th><th>Util</th><th>Active</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="modal-actions">
+      <button class="secondary" id="empClose" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ADD EMPLOYEE MODAL ============ -->
+<div class="modal-back" id="empAddModal">
+  <div class="modal">
+    <h2>Add employee</h2>
+    <p class="hint">Creates a login account for them too. Name is how they appear on tasks, so it must match how you assign work.</p>
+    <div class="form">
+      <div class="field full"><label>Employee ID</label><input id="eaId" placeholder="e.g. AX10895"></div>
+      <div class="field full"><label>Employee Name *</label><input id="eaName" placeholder="e.g. Abdullah Shahul Hameed"></div>
+      <div class="field full"><label>Department</label><select id="eaDept"></select></div>
+      <div class="field"><label>Role / Title</label><input id="eaTitle" placeholder="e.g. Admin Executive"></div>
+      <div class="field"><label>Manager</label><input id="eaManager" placeholder="e.g. Bandi Lokesh"></div>
+      <div class="field"><label>Daily capacity (h/day)</label><input id="eaDaily" type="number" min="0" max="24" value="6"></div>
+      <div class="field full"><label>Starter password</label><input id="eaPass" placeholder="Leave blank to auto-generate (8+ chars)"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="eaCancel" type="button">Cancel</button>
+      <button class="primary" id="eaSave" type="button">Add employee</button>
     </div>
   </div>
 </div>

@@ -862,7 +862,7 @@ function renderMembers() {
     return `<div class="member-row">
       <span class="avatar">${initials(m.username)}</span>
       <span class="grow">${esc(m.username)}${self ? ' (you)' : ''}</span>
-      <input type="number" class="cap-input" data-cap="${m.id}" value="${m.capacity || ''}" min="0" step="0.5" title="Capacity in hours per sprint (leave 0 for 30h/wk default)">
+      <input type="number" class="cap-input" data-cap="${m.id}" value="${m.dailyCap || ''}" min="0" step="0.5" title="Daily capacity (hours/day) — leave 0 for the work-hours/day default">
       <select class="dept-input" data-dept="${m.id}" title="Department — used for dept-wise capacity & assignee list">
         <option value="">No dept</option>
         ${(board.settings.departments || []).map((d) => `<option${d === (m.department || '') ? ' selected' : ''}>${esc(d)}</option>`).join('')}
@@ -900,7 +900,7 @@ function renderMembers() {
     inp.onchange = async () => {
       const cap = Math.max(0, Number(inp.value) || 0);
       try {
-        await api(`/api/members/${inp.dataset.cap}/capacity`, { method: 'PATCH', body: { capacity: cap } });
+        await api(`/api/employees/${inp.dataset.cap}`, { method: 'PATCH', body: { daily_capacity: cap } });
         toast('Capacity updated');
         await loadBoard();
       } catch (e) {
@@ -918,6 +918,87 @@ function renderMembers() {
       } catch (e) { toast(e.message, true); }
     };
   });
+}
+
+/* ---------- employees (team sheet) ---------- */
+let empData = { rows: [], totals: {}, departments: [], workDays: 5 };
+
+function openEmployees() {
+  $('sidebar').classList.remove('open');
+  loadEmployees().catch((e) => toast(e.message, true));
+}
+
+function empDatalist() {
+  const names = (empData.rows || []).map((r) => r.name).map(esc).join('\n');
+  let dl = $('empManagers');
+  if (!dl) {
+    dl = document.createElement('datalist');
+    dl.id = 'empManagers';
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML = names;
+}
+
+async function loadEmployees() {
+  empData = await api('/api/employees');
+  empDatalist();
+  const t = empData.totals || {};
+  $('empRange').textContent = isAdmin() ? 'editable · auto-saves' : 'view only';
+  $('empSummary').innerHTML = `
+    <div class="emp-sum"><b>${t.people || 0}</b><span>active people</span></div>
+    <div class="emp-sum"><b>${fmtFull(t.capacity)}</b><span>capacity this week</span></div>
+    <div class="emp-sum"><b>${fmtFull(t.workload)}</b><span>planned workload</span></div>
+    <div class="emp-sum"><b>${fmtFull(t.available)}</b><span>available</span></div>
+    <div class="emp-sum"><b class="${t.utilization > 100 ? 'ov' : t.utilization >= 80 ? 'wk' : 'ok'}">${t.utilization || 0}%</b><span>utilisation</span></div>
+    <div class="emp-sum rm"><b>${empData.workDays}</b><span>working days this week</span></div>`;
+  const can = isAdmin();
+  $('empTable').querySelector('tbody').innerHTML = empData.rows.map((r) => {
+    const depOpts = '<option value="">No dept</option>' + empData.departments.map((d) => `<option${d === r.department ? ' selected' : ''}>${esc(d)}</option>`).join('');
+    const idv = `data-id="${r.id}"`;
+    return `<tr class="${r.isActive ? '' : 'inactive-row'}">
+      <td>${can ? `<input class="emp-in emp-id" data-f="employeeId" ${idv} value="${esc(r.employeeId)}" title="Employee ID">` : esc(r.employeeId)}</td>
+      <td><b>${esc(r.name)}</b></td>
+      <td>${can ? `<select class="dept-input" data-f="department" ${idv}>${depOpts}</select>` : esc(r.department)}</td>
+      <td>${can ? `<input class="emp-in" data-f="title" ${idv} value="${esc(r.title)}" title="Role">` : esc(r.title)}</td>
+      <td>${can ? `<input class="emp-in" data-f="manager" ${idv} value="${esc(r.manager)}" list="empManagers" title="Manager">` : esc(r.manager)}</td>
+      <td>${can ? `<input type="number" class="emp-in emp-num" data-f="daily_capacity" ${idv} value="${r.dailyCap}" min="0" max="24" step="0.5" title="Hours per day">` : r.dailyCap}</td>
+      <td>${fmtFull(r.weeklyCap)}</td>
+      <td class="${r.over ? 'ov' : r.utilization >= 80 ? 'wk' : 'ok'}">${fmtFull(r.workload)}</td>
+      <td>${fmtFull(r.available)}</td>
+      <td>${pctCell(r.utilization)}</td>
+      <td class="emp-flag">${can
+        ? `<input type="checkbox" class="emp-active" data-f="is_active" ${idv} ${r.isActive ? 'checked' : ''} title="Active (can log in)">
+           <span class="${r.isActive ? 'on' : 'off'}">${r.isActive ? 'Yes' : 'No'}</span>`
+        : (r.isActive ? 'Yes' : 'No')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="11" style="color:var(--muted)">No employees yet — click "+ Add employee" to build your team sheet</td></tr>';
+  $('empTable').querySelector('tbody').onchange = async (ev) => {
+    const el = ev.target.closest('[data-f]');
+    if (!el) return;
+    let payload;
+    if (el.dataset.f === 'is_active') payload = { is_active: el.checked };
+    else if (el.dataset.f === 'daily_capacity') payload = { daily_capacity: Math.max(0, Number(el.value) || 0) };
+    else payload = { [el.dataset.f]: el.value.trim() };
+    if (el.dataset.f !== 'is_active' && el.tagName === 'INPUT' && !el.value.trim()) el.value = el.dataset.prev || '';
+    try {
+      await api(`/api/employees/${el.dataset.id}`, { method: 'PATCH', body: payload });
+      toast('Saved — recalculating');
+      await loadAfterEdit();
+    } catch (e) {
+      toast(e.message, true);
+      await loadAfterEdit();
+    }
+  };
+  openModal('employeesModal');
+}
+
+async function loadAfterEdit() {
+  try { await Promise.all([loadBoard(), loadEmployees()]); } catch {}
+}
+
+function openEmpAdd() {
+  $('eaDept').innerHTML = '<option value="">No dept</option>' + (empData.departments || []).map((d) => `<option>${esc(d)}</option>`).join('');
+  openModal('empAddModal');
 }
 
 /* ---------- capacity & reports ---------- */
@@ -1408,7 +1489,12 @@ function connectSocket() {
   socket = io();
   socket.on('board:changed', () => {
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => loadBoard().catch(() => {}), 150);
+    refreshTimer = setTimeout(async () => {
+      await loadBoard().catch(() => {});
+      if (document.getElementById('employeesModal')?.classList.contains('show')) {
+        loadEmployees().catch(() => {});
+      }
+    }, 150);
   });
   socket.on('connect_error', () => {});
 }
@@ -1459,6 +1545,7 @@ function bindEvents() {
   $('navSettings').onclick = openSettings;
   $('navLabels').onclick = openLabels;
   $('navMembers').onclick = openMembers;
+  $('navEmployees').onclick = openEmployees;
   $('navCalendar').onclick = () => { $('sidebar').classList.remove('open'); openCalendar(); };
   $('calClose').onclick = () => closeModal('calendarModal');
   $('navReports').onclick = openReports;
@@ -1531,6 +1618,29 @@ function bindEvents() {
   $('cfAdd').onclick = addField;
   $('lbClose').onclick = () => closeModal('labelsModal');
   $('memClose').onclick = () => closeModal('membersModal');
+  $('empClose').onclick = () => closeModal('employeesModal');
+  $('empAdd').onclick = openEmpAdd;
+  $('eaCancel').onclick = () => closeModal('empAddModal');
+  $('eaSave').onclick = async () => {
+    const name = $('eaName').value.trim();
+    if (name.length < 2) { toast('Employee name is required', true); return; }
+    try {
+      const r = await api('/api/employees', { method: 'POST', body: {
+        employeeId: $('eaId').value.trim(),
+        name,
+        department: $('eaDept').value,
+        title: $('eaTitle').value.trim(),
+        manager: $('eaManager').value.trim(),
+        dailyCapacity: Number($('eaDaily').value) || 0,
+        password: $('eaPass').value,
+      } });
+      closeModal('empAddModal');
+      $('eaId').value = ''; $('eaName').value = ''; $('eaTitle').value = '';
+      $('eaManager').value = ''; $('eaDaily').value = 6; $('eaPass').value = '';
+      toast(r.generated ? `Created. Login password: ${r.password} — share it with them` : 'Employee added');
+      await loadEmployees().catch(() => {});
+    } catch (e) { toast(e.message, true); }
+  };
   $('inviteRegen').onclick = regenInvite;
   $('inviteCopy').onclick = copyInvite;
 
