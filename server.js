@@ -1359,7 +1359,7 @@ io.use((socket, next) => {
 io.on('connection', () => {});
 
 // ---------- static & errors ----------
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: 0, etag: false, setHeaders: (res) => { res.setHeader('Cache-Control', 'no-store'); } }));
 app.use((req, res, next) => {
   if (req.method === 'GET' && !req.path.startsWith('/api')) {
     return res.sendFile(path.join(__dirname, 'public', 'index.html'));
