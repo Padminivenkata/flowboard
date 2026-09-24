@@ -74,7 +74,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
 /* ============ board ============ */
 .board{flex:1;overflow:auto;padding:8px 24px 24px}
 .columns{display:flex;gap:14px;min-height:100%;align-items:flex-start}
-.column{background:var(--col-bg);border-radius:12px;padding:10px;display:flex;flex-direction:column;width:288px;flex-shrink:0;min-height:500px;max-height:100%}
+.column{background:var(--col-bg);border-radius:12px;padding:10px;display:flex;flex-direction:column;flex:1 1 0;min-width:150px;max-width:300px;min-height:500px;max-height:100%}
 .column.col-dragover{outline:2px dashed #8b7cff;outline-offset:-2px}
 .col-head{display:flex;align-items:center;padding:4px 5px 11px;font-size:13px;font-weight:750;gap:7px;cursor:grab}
 .col-head:active{cursor:grabbing}
