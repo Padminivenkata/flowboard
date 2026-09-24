@@ -294,11 +294,6 @@ function renderColumns() {
   if (edit) {
     html += `<div class="add-col-slot"><button class="add" data-act="add-col">＋ Add column</button></div>`;
   }
-  const bl = leftmostCol();
-  const backlogN = bl ? list.filter((t) => t.column_id === bl.id).length : 0;
-  if (backlogN) {
-    html = `<div class="backlog-note"><b>${backlogN}</b> task${backlogN === 1 ? '' : 's'} waiting in <b>Sprint Backlog</b> — <button type="button" data-act="go-backlog">open backlog</button></div>` + html;
-  }
   $('columns').innerHTML = html;
 }
 
@@ -391,7 +386,6 @@ function bindBoard() {
     const act = e.target.closest('[data-act]');
     if (act) {
       const kind = act.dataset.act;
-      if (kind === 'go-backlog') { toggleBacklog(); return; }
       if (kind === 'to-sprint') { e.stopPropagation(); moveToSprint(Number(act.closest('.card').dataset.id)); return; }
       if (kind === 'task-menu') { e.stopPropagation(); openTaskMenu(act); return; }
       if (kind === 'sprint-all') { moveAllToSprint(); return; }
