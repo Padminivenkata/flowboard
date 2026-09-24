@@ -280,7 +280,7 @@
 <!-- ============ EMPLOYEES MODAL (team sheet) ============ -->
 <div class="modal-back" id="employeesModal">
   <div class="modal wide tall">
-    <h2>Employees <span class="cal-range" id="empRange"></span></h2>
+    <h2>Employees <span class="cal-range" id="empRange"></span><button class="modal-x" id="empX" type="button" title="Close">✕</button></h2>
     <p class="hint">This is your live team sheet. Edit the white fields (Employee ID, Department, Role, Manager, Daily capacity, Active) — the grey columns <b>Capacity/wk, Workload, Available, Util</b> update automatically from your tasks &amp; time tracking.</p>
     <div class="emp-summary" id="empSummary"></div>
     <div class="sr-head" style="margin:12px 0 6px">
@@ -305,7 +305,7 @@
 <!-- ============ ADD EMPLOYEE MODAL ============ -->
 <div class="modal-back" id="empAddModal">
   <div class="modal">
-    <h2>Add employee</h2>
+    <h2>Add employee<button class="modal-x" id="eaX" type="button" title="Close">✕</button></h2>
     <p class="hint">Creates a login account for them too. Name is how they appear on tasks, so it must match how you assign work.</p>
     <div class="form">
       <div class="field full"><label>Employee ID</label><input id="eaId" placeholder="e.g. AX10895"></div>

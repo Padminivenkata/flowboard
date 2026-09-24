@@ -924,6 +924,7 @@ function renderMembers() {
 let empData = { rows: [], totals: {}, departments: [], workDays: 5 };
 
 function openEmployees() {
+  if ($('employeesModal').classList.contains('show')) { closeModal('employeesModal'); return; }
   $('sidebar').classList.remove('open');
   loadEmployees().catch((e) => toast(e.message, true));
 }
@@ -1619,7 +1620,9 @@ function bindEvents() {
   $('lbClose').onclick = () => closeModal('labelsModal');
   $('memClose').onclick = () => closeModal('membersModal');
   $('empClose').onclick = () => closeModal('employeesModal');
+  $('empX').onclick = () => closeModal('employeesModal');
   $('empAdd').onclick = openEmpAdd;
+  $('eaX').onclick = () => closeModal('empAddModal');
   $('eaCancel').onclick = () => closeModal('empAddModal');
   $('eaSave').onclick = async () => {
     const name = $('eaName').value.trim();
