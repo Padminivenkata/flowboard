@@ -969,7 +969,7 @@ async function loadEmployees() {
     const idv = `data-id="${r.id}"`;
     return `<tr class="${r.isActive ? '' : 'inactive-row'}">
       <td>${can ? `<input class="emp-in emp-id" data-f="employeeId" ${idv} value="${esc(r.employeeId)}" title="Employee ID">` : esc(r.employeeId)}</td>
-      <td><b>${esc(r.name)}</b></td>
+      <td>${can ? `<input class="emp-in" data-f="name" ${idv} value="${esc(r.name)}" title="Employee name (updates on tasks too)" list="empManagers">` : `<b>${esc(r.name)}</b>`}</td>
       <td>${can ? `<select class="dept-input" data-f="department" ${idv}>${depOpts}</select>` : esc(r.department)}</td>
       <td>${can ? `<input class="emp-in" data-f="title" ${idv} value="${esc(r.title)}" title="Role">` : esc(r.title)}</td>
       <td>${can ? `<input class="emp-in" data-f="manager" ${idv} value="${esc(r.manager)}" list="empManagers" title="Manager">` : esc(r.manager)}</td>
