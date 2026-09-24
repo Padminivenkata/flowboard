@@ -456,14 +456,6 @@ async function moveAllToSprint() {
   await loadBoard();
 }
 
-function toggleBacklog() {
-  backlogMode = !backlogMode;
-  $('navBoard').classList.toggle('active', !backlogMode);
-  $('navBacklog').classList.toggle('active', backlogMode);
-  $('sidebar').classList.remove('open');
-  renderColumns();
-}
-
 function closeTaskMenu() {
   document.querySelectorAll('.task-menu-pop').forEach((el) => el.remove());
 }
@@ -1635,8 +1627,7 @@ function bindEvents() {
   $('authForm').onsubmit = handleAuth;
   $('logoutBtn').onclick = logout;
   $('menuToggle').onclick = () => $('sidebar').classList.toggle('open');
-  $('navBoard').onclick = () => { backlogMode = false; $('navBoard').classList.add('active'); $('navBacklog').classList.remove('active'); $('sidebar').classList.remove('open'); renderColumns(); };
-  $('navBacklog').onclick = toggleBacklog;
+  $('navBoard').onclick = () => { backlogMode = false; $('navBoard').classList.add('active'); $('sidebar').classList.remove('open'); renderColumns(); };
   $('navSettings').onclick = openSettings;
   $('navLabels').onclick = openLabels;
   $('navMembers').onclick = openMembers;
@@ -1656,7 +1647,7 @@ function bindEvents() {
     await saveHolidays();
   };
   $('mDept').onchange = () => fillAssigneeList($('mDept').value);
-  $('btnNewTask').onclick = () => openTaskNew(null);
+  $('btnNewTask').onclick = () => openTaskNew(board && board.columns.length ? sprintTargetCol() : null);
   $('btnNewSprint').onclick = () => openSprintModal(null);
   $('sprintSelect').onchange = () => {
     const v = Number($('sprintSelect').value);
