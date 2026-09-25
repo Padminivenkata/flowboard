@@ -455,3 +455,32 @@ button.small{padding:6px 11px;font-size:11.5px}
 .s-empty{font-size:12px;color:var(--muted);padding:14px 8px;text-align:center;border:1px dashed var(--line2);border-radius:9px}
 .s-empty.naked{border-style:solid;background:#fff}
 .b-empty{font-size:12.5px;color:var(--muted);padding:24px 10px;text-align:center}
+
+/* ---------- cycle time ---------- */
+.cycle-ana{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;padding:10px 14px 2px}
+.cycle-ana .cyc-block{min-width:220px;flex:1 1 300px}
+.cycle-ana h4{font-size:11px;font-weight:750;letter-spacing:.04em;color:#7a7f8e;text-transform:uppercase;margin:0 0 6px}
+.cycrow{display:flex;align-items:center;gap:8px;font-size:12px;padding:2.5px 0}
+.cyc-lab{font-size:11.5px;font-weight:650;min-width:88px;flex-shrink:0;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cyc-val{font-size:11.5px;color:#505461;white-space:nowrap;flex-shrink:0}
+.cyc-val em{color:#9aa0af;font-style:normal}
+.cyc-val .rm{font-weight:400}
+.hist{display:flex;align-items:flex-end;gap:5px;height:88px;padding:2px 0}
+.hist-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px;min-width:0}
+.hist-bar{width:70%;max-width:26px;background:var(--purple);border-radius:4px 4px 0 0;min-height:2px}
+.hist-lab{font-size:9.5px;color:var(--muted);white-space:nowrap}
+.cycle-rep{margin:18px 0}
+.cycle-rep h3{margin:2px 0 10px}
+.cyc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media (max-width:1050px){.cyc-grid{grid-template-columns:repeat(2,1fr)}}
+.cyc-card{border:1px solid var(--line2);border-radius:12px;background:#fff;padding:12px}
+.cyc-card h4{font-size:11.5px;font-weight:750;letter-spacing:.03em;color:#7a7f8e;text-transform:uppercase;margin:0 0 8px}
+.cyc-card.c-span2{grid-column:span 2}
+.cyc-stat{border-bottom:1px solid var(--line);padding:6px 0}
+.cyc-stat:last-child{border-bottom:none}
+.cyc-stat b{font-size:22px;display:block}
+.cyc-stat span{font-size:11px;color:var(--muted)}
+.cyc-trend{display:flex;align-items:flex-end;gap:6px;height:110px}
+.trend-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px;min-width:0}
+.trend-bar{width:100%;max-width:30px;background:#7ac7a0;border-radius:4px 4px 0 0;min-height:2px}
+.trend-lab,.trend-meta{font-size:9.5px;color:var(--muted);white-space:nowrap}

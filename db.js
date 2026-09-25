@@ -270,6 +270,16 @@ export async function initDb() {
     }
   }
 
+  const setb = await db.execute('PRAGMA table_info(settings)');
+  const hadCycleStart = setb.rows.some((r) => r.name === 'cycle_start_col');
+  if (!hadCycleStart) {
+    await db.execute('ALTER TABLE settings ADD COLUMN cycle_start_col INTEGER NOT NULL DEFAULT 0');
+    const inProg = (await db.execute("SELECT id FROM board_columns WHERE lower(name) = 'in progress' ORDER BY position, id LIMIT 1")).rows[0];
+    const startC = (await db.execute("SELECT id FROM board_columns WHERE stage = 'start' ORDER BY position, id LIMIT 1")).rows[0];
+    const def = inProg || startC;
+    if (def) await db.execute({ sql: 'UPDATE settings SET cycle_start_col = ? WHERE id = 1', args: [Number(def.id)] });
+  }
+
   const current = (await db.execute('SELECT active_sprint_id FROM settings WHERE id = 1')).rows[0];
   const activeId = Number(current?.active_sprint_id) || 0;
   if (activeId > 0) {

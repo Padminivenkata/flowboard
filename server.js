@@ -237,6 +237,7 @@ async function getSettings() {
     invite_code: s.invite_code || '',
     holidays: safeJson(s.holidays, []),
     work_hours_per_day: Number(s.work_hours_per_day) || 6,
+    cycle_start_col: Number(s.cycle_start_col) || 0,
   };
 }
 
@@ -328,6 +329,82 @@ const dailyCapOf = (m, wh) => {
   return cap > 0 ? cap / 5 : wh;
 };
 
+const CYCLE_BUCKETS = [
+  { label: '<2h', lo: 0, hi: 120 },
+  { label: '2–8h', lo: 120, hi: 480 },
+  { label: '8–24h', lo: 480, hi: 1440 },
+  { label: '1–3d', lo: 1440, hi: 4320 },
+  { label: '3–7d', lo: 4320, hi: 10080 },
+  { label: '>7d', lo: 10080, hi: Infinity },
+];
+
+// Cycle time: auto-tracks from the configured start column (default: In Progress)
+// until the task reaches the Done column, then it stops automatically.
+function cycleStats(rows, mvRows, columns, s) {
+  const cycleStartId = Number((s || {}).cycle_start_col) || 0;
+  const startCol = columns.find((c) => Number(c.id) === cycleStartId)
+    || columns.find((c) => c.stage === 'start') || null;
+  const doneCol = columns.find((c) => c.stage === 'done') || null;
+  const movesByTask = {};
+  for (const r of mvRows) {
+    const tid = Number(r.task_id);
+    (movesByTask[tid] ||= []).push({ col: Number(r.column_id), at: Number(r.at) });
+  }
+  const nowSec = Math.floor(Date.now() / 1000);
+  const tasks = rows.map((r) => {
+    const task = normTask(r);
+    const moves = movesByTask[task.id] || [];
+    let startedAt = null;
+    let doneAt = null;
+    let cycleMinutes = null;
+    if (startCol) {
+      const started = moves.filter((ev) => ev.col === startCol.id).sort((a, b) => a.at - b.at)[0];
+      startedAt = started ? started.at : null;
+    }
+    if (startCol && doneCol && startedAt != null) {
+      const done = moves.filter((ev) => ev.col === doneCol.id && ev.at > startedAt).sort((a, b) => a.at - b.at)[0];
+      doneAt = done ? done.at : null;
+      if (doneAt != null) cycleMinutes = Math.round((doneAt - startedAt) / 60);
+    }
+    task.startedAt = startedAt;
+    task.doneAt = doneAt;
+    task.cycleMinutes = cycleMinutes;
+    return task;
+  });
+
+  const dwellByCol = new Map(columns.map((c) => [c.id, []]));
+  for (const r of rows) {
+    const tid = Number(r.id);
+    const evs = (movesByTask[tid] || []).slice().sort((a, b) => a.at - b.at);
+    const curCol = Number(r.column_id);
+    for (let i = 0; i < evs.length; i++) {
+      let j = i;
+      while (j + 1 < evs.length && evs[j + 1].col === evs[i].col) j++;
+      const endT = (j + 1 < evs.length) ? evs[j + 1].at : (evs[i].col === curCol ? nowSec : evs[i].at);
+      const arr = dwellByCol.get(evs[i].col);
+      if (arr) arr.push(Math.max(0, endT - evs[i].at));
+      i = j;
+    }
+  }
+  const byColumn = columns.map((c) => {
+    const arr = dwellByCol.get(c.id) || [];
+    return {
+      id: c.id, name: c.name, color: c.color,
+      count: arr.length,
+      avgMinutes: arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length / 60) : null,
+      now: rows.filter((r) => Number(r.column_id) === c.id).length,
+    };
+  });
+
+  const cycles = tasks.filter((t) => t.cycleMinutes != null).map((t) => t.cycleMinutes);
+  const histogram = CYCLE_BUCKETS.map((b) => ({
+    label: b.label,
+    count: cycles.filter((m) => m >= b.lo && m < b.hi).length,
+  }));
+
+  return { startCol, doneColId: doneCol ? doneCol.id : null, tasks, byColumn, cycles, histogram };
+}
+
 app.get('/api/board', auth, async (req, res, next) => {
   try {
     const [s, c, t, g, f, m, mv, cm, at] = await Promise.all([
@@ -346,35 +423,10 @@ app.get('/api/board', auth, async (req, res, next) => {
       id: Number(r.id), name: r.name, color: r.color,
       position: Number(r.position), stage: r.stage || 'normal',
     }));
-    const startCol = columns.find((x) => x.stage === 'start');
     const doneCol = columns.find((x) => x.stage === 'done');
 
-    const movesByTask = {};
-    for (const r of mv.rows) {
-      const tid = Number(r.task_id);
-      (movesByTask[tid] ||= []).push({ col: Number(r.column_id), at: Number(r.at) });
-    }
-
-    const tasks = t.rows.map((r) => {
-      const task = normTask(r);
-      const moves = movesByTask[task.id] || [];
-      let startedAt = null;
-      let doneAt = null;
-      let cycleMinutes = null;
-      if (startCol) {
-        const started = moves.filter((ev) => ev.col === startCol.id)[0];
-        startedAt = started ? started.at : null;
-      }
-      if (startCol && doneCol && startedAt != null) {
-        const done = moves.filter((ev) => ev.col === doneCol.id && ev.at > startedAt)[0];
-        doneAt = done ? done.at : null;
-        if (doneAt != null) cycleMinutes = Math.round((doneAt - startedAt) / 60);
-      }
-      task.startedAt = startedAt;
-      task.doneAt = doneAt;
-      task.cycleMinutes = cycleMinutes;
-      return task;
-    });
+    const cy = cycleStats(t.rows, mv.rows, columns, s);
+    const tasks = cy.tasks;
 
     const wh = Number((s || {}).work_hours_per_day) || 6;
     const capacity = m.rows.map((u) => ({
@@ -388,12 +440,18 @@ app.get('/api/board', auth, async (req, res, next) => {
     }));
 
     const cycles = tasks.filter((t) => t.cycleMinutes != null).map((t) => t.cycleMinutes);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const monSec = Math.floor(mondayOf(dateKey(new Date())).getTime() / 1000) || 0;
     const stats = {
       avgCycleMinutes: cycles.length ? Math.round(cycles.reduce((a, b2) => a + b2, 0) / cycles.length) : null,
       doneCount: doneCol ? tasks.filter((t) => t.column_id === doneCol.id).length : 0,
       openCount: doneCol ? tasks.filter((t) => t.column_id !== doneCol.id).length : tasks.length,
       totalHours: Math.round(tasks.reduce((s2, t) => s2 + hoursInt(t.hours), 0) * 10) / 10,
       cycleCount: cycles.length,
+      doneToday: tasks.filter((t) => t.doneAt != null && nowSec - t.doneAt < 86400).length,
+      doneThisWeek: tasks.filter((t) => t.doneAt != null && t.doneAt >= monSec).length,
+      byColumn: cy.byColumn,
+      histogram: cy.histogram,
     };
 
     res.json({
@@ -401,6 +459,7 @@ app.get('/api/board', auth, async (req, res, next) => {
       settings: s || {
         workspace_name: 'APPX Delivery', board_name: 'Task Board', sprint_name: '',
         sprint_start: '', sprint_end: '', sprint_active: false, active_sprint_id: 0,
+        cycle_start_col: 0,
         sprints: [], departments: [], priorities: [],
       },
       columns,
@@ -1186,6 +1245,15 @@ app.patch('/api/settings', auth, need('editor'), async (req, res, next) => {
       sets.push('work_hours_per_day = ?');
       args.push(String(n));
     }
+    if (b.cycle_start_col !== undefined) {
+      const v = Math.max(0, Math.round(Number(b.cycle_start_col) || 0));
+      if (v !== 0) {
+        const ok = await db.execute({ sql: 'SELECT 1 FROM board_columns WHERE id = ?', args: [v] });
+        if (!ok.rows.length) return res.status(400).json({ error: 'Invalid cycle start column' });
+      }
+      sets.push('cycle_start_col = ?');
+      args.push(String(v));
+    }
     let finalizeAfter = 0;
     if (b.sprint_active !== undefined && b.sprint_active === false) {
       const aid = await activeSprintId();
@@ -1382,7 +1450,8 @@ app.get('/api/reports', auth, async (req, res, next) => {
     const st = await getSettings();
     const members = (await db.execute('SELECT * FROM users ORDER BY username COLLATE NOCASE')).rows;
     const columns = (await db.execute('SELECT * FROM board_columns ORDER BY position, id')).rows;
-    const tasks = (await db.execute('SELECT * FROM tasks')).rows.map(normTask);
+    const rawTasks = (await db.execute('SELECT * FROM tasks')).rows;
+    const tasks = rawTasks.map(normTask);
     const sprints = (await db.execute('SELECT * FROM sprints ORDER BY id ASC')).rows;
 
     const holidays = st.holidays || [];
@@ -1555,14 +1624,52 @@ app.get('/api/reports', auth, async (req, res, next) => {
       };
     });
 
+    const mv = (await db.execute('SELECT * FROM task_moves ORDER BY at, id')).rows;
+    const cyc = cycleStats(rawTasks, mv, columns, st);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const wipTasks = cyc.tasks.filter((t) => t.startedAt != null && !(cyc.doneColId != null && t.column_id === cyc.doneColId));
+    const wipAges = wipTasks.map((t) => Math.max(0, nowSec - t.startedAt));
+    const cycle = {
+      startCol: cyc.startCol ? { id: cyc.startCol.id, name: cyc.startCol.name } : null,
+      avgMinutes: cyc.cycles.length ? Math.round(cyc.cycles.reduce((a, b) => a + b, 0) / cyc.cycles.length) : null,
+      doneCount: cyc.cycles.length,
+      byColumn: cyc.byColumn,
+      histogram: cyc.histogram,
+      wipCount: wipTasks.length,
+      wipAvgMinutes: wipAges.length ? Math.round(wipAges.reduce((a, b) => a + b, 0) / wipAges.length / 60) : null,
+      wipOldestMinutes: wipAges.length ? Math.round(Math.max(...wipAges) / 60) : null,
+      recentDone: cyc.tasks
+        .filter((t) => t.doneAt != null && t.doneAt >= nowSec - 14 * 86400)
+        .sort((a, b) => b.doneAt - a.doneAt)
+        .slice(0, 25)
+        .map((t) => ({ title: t.title, assignee: t.assignee, cycleMinutes: t.cycleMinutes, doneAt: t.doneAt })),
+      trend: (() => {
+        const weeks = [];
+        const thisMon = mondayOf(dateKey(new Date()));
+        for (let w = -7; w <= 0; w++) {
+          const mon = addDays(thisMon, w * 7);
+          const lo = Math.floor(mon.getTime() / 1000);
+          const hi = Math.floor(addDays(mon, 7).getTime() / 1000);
+          const inWeek = cyc.tasks.filter((t) => t.doneAt != null && t.doneAt >= lo && t.doneAt < hi);
+          weeks.push({
+            key: dateKey(mon),
+            count: inWeek.length,
+            avgMinutes: inWeek.length ? Math.round(inWeek.reduce((a, t) => a + t.cycleMinutes, 0) / inWeek.length) : null,
+          });
+        }
+        return weeks;
+      })(),
+    };
+
     res.json({
-      settings: { holidays, work_hours_per_day: wh, departments: st.departments || [] },
+      settings: { holidays, work_hours_per_day: wh, departments: st.departments || [], cycle_start_col: Number(st.cycle_start_col) || 0 },
       departments: deptTable,
       members: memberTable,
       weeks: weekMatrix,
       sprints: sprintRows,
       recurringTasks,
       columns: columns.map((c) => ({ id: Number(c.id), name: c.name, stage: c.stage })),
+      cycle,
     });
   } catch (e) { next(e); }
 });

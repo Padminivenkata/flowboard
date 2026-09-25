@@ -126,10 +126,26 @@ function renderStats() {
   const st = board.stats;
   $('statbar').hidden = !st;
   if (!st) return;
-  $('statCycle').innerHTML = `Avg cycle (In Progress → Done): <span>${fmtCycle(st.avgCycleMinutes)}</span> <em>(${st.cycleCount} done)</em>`;
-  $('statDone').innerHTML = `Done: <span>${st.doneCount}</span>`;
-  $('statOpen').innerHTML = `Open: <span>${st.openCount}</span>`;
+  $('statCycle').innerHTML = `Avg cycle <em>(${esc((cycleStartCol() || {}).name || 'start')} → Done)</em>: <span>${fmtCycle(st.avgCycleMinutes)}</span> <em>(${st.cycleCount} done)</em>`;
+  $('statDone').innerHTML = `Done: <span>${st.doneCount}</span><em> · today ${st.doneToday || 0}</em>`;
+  $('statOpen').innerHTML = `Open: <span>${st.openCount}</span><em> · wk ${st.doneThisWeek || 0} done</em>`;
   $('statHours').innerHTML = `Total hours: <span>${fmtFull(st.totalHours)}</span>`;
+  const ana = $('cycleAna');
+  ana.hidden = !(st.byColumn && st.byColumn.length);
+  if (ana.hidden) return;
+  const maxDwell = Math.max(1, ...st.byColumn.map((c) => c.avgMinutes || 0));
+  $('cycDwell').innerHTML = st.byColumn.map((c) => `
+    <div class="cycrow">
+      <span class="cyc-lab" style="color:${esc(c.color)}">${esc(c.name)}</span>
+      <div class="cap-bar" style="flex:1;margin:0"><i style="width:${Math.round(((c.avgMinutes || 0) / maxDwell) * 100)}%"></i></div>
+      <span class="cyc-val">${c.avgMinutes != null ? fmtCycle(c.avgMinutes) : '—'}<em> · ${c.now} now</em></span>
+    </div>`).join('');
+  const maxHist = Math.max(1, ...st.histogram.map((h) => h.count), 1);
+  $('cycHist').innerHTML = st.histogram.map((h) => `
+    <div class="hist-col" title="${esc(h.label)}: ${h.count}">
+      <div class="hist-bar" style="height:${Math.round((h.count / maxHist) * 100)}%"></div>
+      <div class="hist-lab">${esc(h.label)}</div>
+    </div>`).join('');
 }
 
 function renderCapacity() {
@@ -212,6 +228,11 @@ function filteredTasks() {
 
 let backlogMode = false;
 const leftmostCol = () => board.columns.slice().sort((a, b) => a.position - b.position)[0];
+const cycleStartCol = () => {
+  const sid = Number(board.settings.cycle_start_col) || 0;
+  return (sid ? board.columns.find((c) => c.id === sid) : null)
+    || board.columns.find((c) => c.stage === 'start') || null;
+};
 
 function cardHtml(t) {
   const edit = canEdit();
@@ -226,7 +247,7 @@ function cardHtml(t) {
   if (t.department) chips += `<span class="tag">${esc(t.department)}</span>`;
   if (t.hours) chips += `<span class="tag">${esc(t.hours)}</span>`;
   if (t.recur) chips += `<span class="tag" title="Recurring · ${t.recurHistory.length} completed">↻ ${RECURLABELS[t.recur] || t.recur}</span>`;
-  const startCol = board.columns.find((c) => c.stage === 'start');
+  const startCol = cycleStartCol();
   if (startCol && t.column_id === startCol.id && t.startedAt != null) {
     chips += `<span class="tag timelive" data-live="${t.startedAt}" title="Elapsed in ${esc(startCol.name)}">⏱ ${fmtElapsed(t.startedAt, Date.now() / 1000)}</span>`;
   }
@@ -866,14 +887,14 @@ function openTaskView(id) {
   $('taskModalTitle').textContent = 'Edit Task';
   const cyc = $('mCycle');
   delete cyc.dataset.live;
-  const startCol = board.columns.find((c) => c.stage === 'start');
+  const startCol = cycleStartCol();
   if (startCol && t.column_id === startCol.id && t.startedAt != null) {
     cyc.hidden = false;
     cyc.dataset.live = t.startedAt;
     cyc.innerHTML = `⏱ Live — elapsed in ${esc(startCol.name)}: <b data-idx>${fmtElapsed(t.startedAt, Date.now() / 1000)}</b>`;
   } else if (t.cycleMinutes != null) {
     cyc.hidden = false;
-    cyc.innerHTML = `🔄 Cycle (In Progress → Done): <b>${fmtCycle(t.cycleMinutes)}</b>` +
+    cyc.innerHTML = `🔄 Cycle (${esc((cycleStartCol() || {}).name || 'start')} → Done): <b>${fmtCycle(t.cycleMinutes)}</b>` +
       (t.doneAt ? ` · finished ${new Date(t.doneAt * 1000).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '') +
       (t.loggedMinutes ? ` · logged ${fmtFull(t.loggedMinutes / 60)}` : '');
   } else if (t.loggedMinutes) {
@@ -1258,6 +1279,9 @@ function openSettings() {
   $('sWorkspace').value = s.workspace_name;
   $('sBoard').value = s.board_name;
   $('sHrsDay').value = s.work_hours_per_day || 6;
+  const sel = $('sCycleStart');
+  sel.innerHTML = '<option value="0">Automatic (first work column)</option>' + board.columns.map((c) =>
+    `<option value="${c.id}"${Number(s.cycle_start_col || 0) === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
   draftDepts = [...s.departments];
   draftPris = [...s.priorities];
   redrawSettingsLists = () => {
@@ -1285,6 +1309,7 @@ async function saveSettings() {
         workspace_name: $('sWorkspace').value.trim(),
         board_name: $('sBoard').value.trim(),
         work_hours_per_day: Math.max(1, Math.min(24, Number($('sHrsDay').value) || 6)),
+        cycle_start_col: Math.max(0, Number($('sCycleStart').value) || 0),
         departments: draftDepts,
         priorities: draftPris,
       },
@@ -1649,6 +1674,7 @@ async function loadReports() {
   holidayDraft = [...r.settings.holidays];
   renderHolidays();
   renderSprintReport(r);
+  renderCycleReport(r);
   openModal('reportsModal');
 }
 
@@ -1730,6 +1756,64 @@ function renderSprintCharts(id) {
   $('srTrend').innerHTML = renderTrend(srData.filter((x) => x.status === 'complete'));
   $('srDoneList').innerHTML = s.doneTasks.length ? s.doneTasks.map(taskRow).join('') : '<p class="sr-empty">Nothing completed in this sprint yet.</p>';
   $('srOpenList').innerHTML = s.openTasks.length ? s.openTasks.map(taskRow).join('') : '<p class="sr-empty">All tasks in this sprint are done!</p>';
+}
+
+/* ---------- cycle time report ---------- */
+function renderCycleReport(r) {
+  const c = r.cycle || {};
+  const wrap = $('repCycle');
+  wrap.hidden = false;
+  const startName = c.startCol ? esc(c.startCol.name) : 'start column';
+  const maxDwell = Math.max(1, ...(c.byColumn || []).map((x) => x.avgMinutes || 0));
+  const maxHist = Math.max(1, ...(c.histogram || []).map((h) => h.count), 1);
+  const maxTrend = Math.max(1, ...(c.trend || []).map((w) => w.avgMinutes || 0));
+  wrap.innerHTML = `
+    <h3>Cycle time <em class="sub">tracks from ${startName} → Done, stops automatically</em></h3>
+    <div class="cyc-grid">
+      <div class="cyc-card">
+        <div class="cyc-stat"><b>${c.doneCount || 0}</b><span>completed cycles</span></div>
+        <div class="cyc-stat"><b>${c.avgMinutes != null ? fmtCycle(c.avgMinutes) : '—'}</b><span>avg start→done</span></div>
+      </div>
+      <div class="cyc-card">
+        <div class="cyc-stat"><b>${c.wipCount || 0}</b><span>tracking now</span></div>
+        <div class="cyc-stat"><b>${c.wipOldestMinutes != null ? fmtCycle(c.wipOldestMinutes) : '—'}</b><span>oldest in progress</span></div>
+      </div>
+      <div class="cyc-card">
+        <h4>Avg time in each column</h4>
+        ${(c.byColumn || []).map((x) => `
+          <div class="cycrow">
+            <span class="cyc-lab" style="color:${x.color}">${esc(x.name)}</span>
+            <div class="cap-bar" style="flex:1;margin:0"><i style="width:${Math.round(((x.avgMinutes || 0) / maxDwell) * 100)}%"></i></div>
+            <span class="cyc-val">${x.avgMinutes != null ? fmtCycle(x.avgMinutes) : '—'}<em> · ${x.now} now</em></span>
+          </div>`).join('') || '<p class="sr-empty">No column movement recorded yet — move tasks between columns to build this.</p>'}
+      </div>
+      <div class="cyc-card">
+        <h4>Completed cycle distribution</h4>
+        <div class="hist">${(c.histogram || []).map((h) => `
+          <div class="hist-col" title="${esc(h.label)}: ${h.count}">
+            <div class="hist-bar" style="height:${Math.round((h.count / maxHist) * 100)}%"></div>
+            <div class="hist-lab">${esc(h.label)}</div>
+          </div>`).join('')}</div>
+      </div>
+      <div class="cyc-card c-span2">
+        <h4>Avg cycle time per week</h4>
+        <div class="cyc-trend">${(c.trend || []).map((w) => `
+          <div class="trend-col" title="${w.key}: avg ${w.avgMinutes != null ? fmtCycle(w.avgMinutes) : '—'} · ${w.count} done">
+            <div class="trend-bar" style="height:${Math.round(((w.avgMinutes || 0) / maxTrend) * 100)}%"></div>
+            <div class="trend-lab">${fmtWeekDay(new Date(w.key + 'T00:00:00'))}</div>
+            <div class="trend-meta">${w.avgMinutes != null ? fmtCycle(w.avgMinutes) : '—'}</div>
+          </div>`).join('') || '<p class="sr-empty">No completed tasks yet.</p>'}</div>
+      </div>
+      <div class="cyc-card c-span2">
+        <h4>Completed last 14 days</h4>
+        ${(c.recentDone || []).map((t) => `
+          <div class="cycrow">
+            <span class="cyc-lab grow" style="flex:1;min-width:0"><b style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">${esc(t.title)}</b>
+              <em class="rm" style="color:var(--muted)">${esc(t.assignee || 'unassigned')}</em></span>
+            <span class="cyc-val">↺ ${fmtCycle(t.cycleMinutes)}</span>
+          </div>`).join('') || '<p class="sr-empty">Nothing completed in the last 14 days.</p>'}
+      </div>
+    </div>`;
 }
 
 function renderHolidays() {

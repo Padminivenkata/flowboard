@@ -85,6 +85,10 @@
       <span class="stat" id="statOpen">Open: 0</span>
       <span class="stat" id="statHours">Total hours: 0h</span>
     </div>
+    <div class="cycle-ana" id="cycleAna" hidden>
+      <div class="cyc-block"><h4>Avg time in each column</h4><div id="cycDwell"></div></div>
+      <div class="cyc-block"><h4>Completed cycle times</h4><div class="hist" id="cycHist"></div></div>
+    </div>
 
     <div class="capacity-wrap" id="capacityWrap" hidden>
       <div class="capacity-head"><b>Team capacity &amp; workload</b><span class="cap-summary" id="capSummary"></span><button class="cap-toggle" id="capToggle" type="button" title="Show / hide">▾</button></div>
@@ -239,6 +243,11 @@
       <div class="field"><label>Workspace name</label><input id="sWorkspace"></div>
       <div class="field"><label>Board title</label><input id="sBoard"></div>
       <div class="field"><label>Work hours / day</label><input id="sHrsDay" type="number" min="1" max="24" value="6"></div>
+      <div class="field"><label>Cycle time starts when a task enters</label><select id="sCycleStart">
+        <option value="0">Automatic (first work column)</option>
+      </select>
+        <p class="hint" style="margin-top:4px">Tracks from this column until the task reaches Done, then stops automatically.</p>
+      </div>
       <div class="field full"><label>Departments</label><div class="list-editor" id="sDepts"></div>
         <div class="add-row"><input id="sDeptNew" placeholder="Add department"><button class="secondary" id="sDeptAdd" type="button">Add</button></div>
       </div>
@@ -431,6 +440,7 @@
         <div><h4>Still open in sprint</h4><div id="srOpenList" class="sr-tasks"></div></div>
       </div>
     </div>
+    <div class="cycle-rep" id="repCycle" hidden></div>
     <div class="rep-grid">
       <section>
         <h3>Department capacity &amp; utilisation <em class="sub">this week · buckets</em></h3>
