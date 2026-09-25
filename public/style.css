@@ -365,3 +365,33 @@ main{flex:1;min-width:0;display:flex;flex-direction:column}
   .rep-grid,#reportsModal .modal-actions,#reportsModal .sr-ctrl,#reportsModal .hint{display:none !important}
   .sprint-report{background:#fff;border:none;padding:0;margin:0}
 }
+
+/* ---------- comments & attachments ---------- */
+.bottom .counts{margin-left:auto;display:flex;gap:5px}
+.mini{font-weight:650;color:#6b7080;background:#f1f2f6;padding:2px 6px;border-radius:5px;font-size:9.5px}
+.mini.none{opacity:.4}
+.task-feed{border-top:1px solid var(--line);padding-top:14px;margin-top:4px}
+.comment,.attach{background:#f7f8fb;border:1px solid var(--line2);border-radius:9px;padding:8px 10px;margin-bottom:7px;display:flex;flex-direction:column;gap:4px}
+.comment-head{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted)}
+.comment-head b{color:#4a4f5d;font-size:11.5px}
+.comment-body{font-size:12.5px;line-height:1.5;color:#343744;word-break:break-word;white-space:normal}
+.link-del{background:transparent;color:#9aa0af;font-size:11px;padding:1px 5px;border-radius:5px;margin-left:auto}
+.link-del:hover{background:#e4e5eb;color:var(--danger)}
+.attach-name{font-weight:650;font-size:12.5px;color:#4d43a2;text-decoration:none;word-break:break-all}
+.attach-name:hover{text-decoration:underline}
+.attach-meta{font-size:10.5px;color:var(--muted)}
+.none-msg{font-size:11.5px;color:var(--muted);padding:6px 2px}
+.add-row input[type="file"]{flex:0 0 auto;max-width:60%;font-size:11.5px}
+
+/* ---------- AI assistant ---------- */
+.ai-tabs{display:flex;gap:8px;margin-bottom:14px}
+.ai-status{font-size:12px;color:var(--muted);background:#f4f6f9;border:1px solid var(--line2);border-radius:8px;padding:8px 10px;margin-top:12px}
+.ai-status.err{color:var(--danger);background:#fff0ef;border-color:#f3c9c5}
+.ai-list{margin-top:10px;display:flex;flex-direction:column;gap:9px}
+.ai-item{border:1px solid var(--line2);border-radius:10px;padding:11px 12px;background:#fff}
+.ai-item-title{font-size:13px;font-weight:680;line-height:1.35}
+.ai-item-sub{font-size:12px;color:#5f6471;line-height:1.45;margin-top:3px}
+.ai-item-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;align-items:center}
+.ai-item button{margin-top:9px}
+button.small{padding:6px 11px;font-size:11.5px}
+.ai-sum-box{background:#f7f8fb;border:1px solid var(--line2);border-radius:10px;padding:13px 14px;font-size:12.5px;line-height:1.6;color:#343744;white-space:normal;word-break:break-word}

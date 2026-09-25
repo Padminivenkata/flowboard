@@ -66,6 +66,7 @@
       <button class="secondary" id="btnSprintEdit" type="button" title="Edit sprint" hidden>✎</button>
       <button class="secondary" id="btnNewTask" type="button">+ Task</button>
       <button class="primary" id="btnSprint" type="button">Start Sprint</button>
+      <button class="secondary" id="btnAI" type="button" hidden>✦ AI Assistant</button>
     </header>
 
     <div class="toolbar">
@@ -120,12 +121,48 @@
       <div class="field full" id="mCustomWrap"><label>Custom fields</label><div class="custom-grid" id="mCustom"></div></div>
       <div class="field full"><label>Expected outcome</label><textarea id="mOutcome" placeholder="What should be achieved?"></textarea></div>
       <div class="field full"><label>Acceptance criteria</label><textarea id="mAC" placeholder="Clear completion criteria"></textarea></div>
+      <div class="task-feed" id="mFeedWrap" hidden>
+        <div class="field full"><label>Comments</label><div class="comment-list" id="mComments"></div>
+          <div class="add-row"><input id="mComment" placeholder="Add a comment, press Enter to post"><button class="secondary" id="mCommentAdd" type="button">Comment</button></div>
+        </div>
+        <div class="field full"><label>Attachments</label><div class="attach-list" id="mAttachments"></div>
+          <div class="add-row"><input id="mAttachFile" type="file"><button class="secondary" id="mAttachAdd" type="button">Upload</button></div>
+          <p class="hint">Max 10&nbsp;MB per file.</p>
+        </div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="danger" id="mDelete" type="button">Delete</button>
       <span class="spacer"></span>
       <button class="secondary" id="mCancel" type="button">Cancel</button>
       <button class="primary" id="mSave" type="button">Save Task</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ AI ASSISTANT MODAL ============ -->
+<div class="modal-back" id="aiModal">
+  <div class="modal wide">
+    <h2>✦ AI Assistant</h2>
+    <div class="ai-tabs">
+      <button class="primary" id="aiTabGen" type="button">Generate tasks</button>
+      <button class="secondary" id="aiTabSum" type="button">Board summary</button>
+    </div>
+    <div id="aiPanelGen">
+      <div class="field full"><label>What should the team work on?</label><textarea id="aiPrompt" placeholder="e.g. Prepare the release notes, run regression testing, and plan the Q1 roadmap for the video analytics API"></textarea></div>
+      <button class="primary" id="aiRun" type="button">Generate suggestions</button>
+      <div class="ai-status" id="aiStatus" hidden></div>
+      <div id="aiList" class="ai-list"></div>
+    </div>
+    <div id="aiPanelSum" hidden>
+      <button class="primary" id="aiSumRun" type="button">Summarize this board</button>
+      <div class="ai-status" id="aiSumStatus" hidden></div>
+      <div id="aiOut" class="ai-out"></div>
+    </div>
+    <div class="modal-actions">
+      <span class="hint" id="aiHint">Powered by OpenAI. Only editors can add suggestions.</span>
+      <span class="spacer"></span>
+      <button class="secondary" id="aiClose" type="button">Close</button>
     </div>
   </div>
 </div>

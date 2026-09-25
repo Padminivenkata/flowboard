@@ -113,6 +113,29 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_column ON tasks (column_id, position);
+
+CREATE TABLE IF NOT EXISTS task_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL,
+  user_id INTEGER,
+  author TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments (task_id, created_at);
+
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL,
+  user_id INTEGER,
+  uploader TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL,
+  mime TEXT NOT NULL DEFAULT 'application/octet-stream',
+  size INTEGER NOT NULL DEFAULT 0,
+  data TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_attachments_task ON task_attachments (task_id, created_at);
 `;
 
 const SEED_COLUMNS = [

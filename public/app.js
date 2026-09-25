@@ -105,6 +105,7 @@ function renderAll() {
   $('btnNewSprint').hidden = !canEdit();
   $('btnSprint').hidden = !canEdit();
   $('btnSprintEdit').hidden = !canEdit();
+  $('btnAI').hidden = !canEdit();
   $('navSettings').hidden = !canEdit();
   $('navLabels').hidden = !canEdit();
   $('navMembers').hidden = !isAdmin();
@@ -115,6 +116,7 @@ function renderAll() {
   renderColumns();
   if ($('membersModal').classList.contains('show')) renderMembers();
   if ($('calendarModal').classList.contains('show')) renderCalendar();
+  if ($('taskModal').classList.contains('show')) renderTaskFeed();
 }
 
 function renderStats() {
@@ -240,12 +242,18 @@ function cardHtml(t) {
     }
   }
   const inBacklog = edit && leftmostCol() && t.column_id === leftmostCol().id;
+  const nCom = board.comments.filter((c) => c.task_id === t.id).length;
+  const nAt = board.attachments.filter((a) => a.task_id === t.id).length;
+  const counts = (nCom || nAt)
+    ? `<span class="counts"><span class="mini${nCom ? '' : ' none'}">💬 ${nCom}</span><span class="mini${nAt ? '' : ' none'}">📎 ${nAt}</span></span>`
+    : '';
   return `<div class="card" data-id="${t.id}" ${edit ? 'draggable="true"' : ''}>
     <div class="task-title">${esc(t.title)}</div>
     <div class="meta">${chips}</div>
     <div class="bottom">
       <span class="avatar">${initials(t.assignee)}</span>
       <span>${esc(t.assignee || 'Unassigned')}</span>
+      ${counts}
       <span class="due">${esc(fmtDue(t.due))}</span>
       ${inBacklog ? `<button class="dot-btn" data-act="task-menu" data-id="${t.id}" type="button" title="Actions">⋮</button>` : ''}
     </div>
@@ -582,6 +590,7 @@ function openTaskNew(colId) {
   draftTags = new Set();
   setTaskFormDisabled(false);
   renderTaskExtras(false, {});
+  renderTaskFeed();
   openModal('taskModal');
   $('mTitle').focus();
 }
@@ -632,6 +641,7 @@ function openTaskView(id) {
   draftTags = new Set(t.tags);
   setTaskFormDisabled(!edit);
   renderTaskExtras(!edit, t.customValues);
+  renderTaskFeed();
   openModal('taskModal');
 }
 
@@ -689,6 +699,177 @@ async function deleteTask() {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+/* ---------- task comments & attachments ---------- */
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+const taskCommentsFor = (id) => board.comments.filter((c) => c.task_id === id);
+const taskAttachmentsFor = (id) => board.attachments.filter((a) => a.task_id === id);
+
+function renderTaskFeed() {
+  const wrap = $('mFeedWrap');
+  if (editingTaskId == null || !board) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const edit = canEdit();
+  $('mComment').disabled = !edit;
+  $('mCommentAdd').disabled = !edit;
+  $('mAttachFile').disabled = !edit;
+  $('mAttachAdd').disabled = !edit;
+  const coms = taskCommentsFor(editingTaskId);
+  $('mComments').innerHTML = coms.length ? coms.map((c) => `
+    <div class="comment">
+      <div class="comment-head"><b>${esc(c.author || '—')}</b><span>${esc(c.created_at || '')}</span>${edit ? `<button class="link-del" data-del-com="${c.id}" title="Delete comment">✕</button>` : ''}</div>
+      <div class="comment-body">${esc(c.body).replace(/\n/g, '<br>')}</div>
+    </div>`).join('') : '<div class="none-msg">No comments yet.</div>';
+  const atts = taskAttachmentsFor(editingTaskId);
+  $('mAttachments').innerHTML = atts.length ? atts.map((a) => `
+    <div class="attach">
+      <a class="attach-name" href="/api/tasks/${editingTaskId}/attachments/${a.id}" target="_blank" rel="noopener">📎 ${esc(a.name)}</a>
+      <span class="attach-meta">${fmtBytes(a.size)} · ${esc(a.uploader || '—')} · ${esc(a.created_at || '')}</span>
+      ${edit ? `<button class="link-del" data-del-att="${a.id}" title="Delete attachment">✕</button>` : ''}
+    </div>`).join('') : '<div class="none-msg">No attachments yet.</div>';
+}
+
+async function addComment() {
+  if (!canEdit()) return;
+  const inp = $('mComment');
+  const body = inp.value.trim();
+  if (!body || editingTaskId == null) return;
+  try {
+    await api(`/api/tasks/${editingTaskId}/comments`, { method: 'POST', body: { body } });
+    inp.value = '';
+    toast('Comment added');
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteCommentById(id) {
+  if (!confirm('Delete this comment?')) return;
+  try {
+    await api(`/api/comments/${id}`, { method: 'DELETE' });
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
+}
+
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('Could not read file'));
+    fr.readAsDataURL(file);
+  });
+}
+
+async function uploadAttachment() {
+  if (!canEdit()) return;
+  const input = $('mAttachFile');
+  const file = input.files && input.files[0];
+  if (!file || editingTaskId == null) return;
+  if (file.size > 10 * 1024 * 1024) { toast('Max 10 MB per file', true); input.value = ''; return; }
+  try {
+    toast('Uploading…');
+    const data = await readFileAsDataURL(file);
+    await api(`/api/tasks/${editingTaskId}/attachments`, {
+      method: 'POST',
+      body: { name: file.name, mime: file.type || 'application/octet-stream', size: file.size, data },
+    });
+    input.value = '';
+    toast('Attachment uploaded');
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteAttachmentById(id) {
+  if (!confirm('Delete this attachment?')) return;
+  try {
+    await api(`/api/attachments/${id}`, { method: 'DELETE' });
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- AI assistant ---------- */
+let aiSuggestions = [];
+
+function setStatus(id, msg, err) {
+  const el = $(id);
+  el.hidden = !msg;
+  el.textContent = msg || '';
+  el.className = 'ai-status' + (err ? ' err' : '');
+}
+
+async function runAiGenerate() {
+  const prompt = $('aiPrompt').value.trim();
+  if (!prompt) { toast('Describe what to generate first', true); return; }
+  setStatus('aiStatus', 'Generating…', false);
+  $('aiRun').disabled = true;
+  $('aiList').innerHTML = '';
+  try {
+    const d = await api('/api/ai', { method: 'POST', body: { mode: 'generate', instruction: prompt } });
+    aiSuggestions = d.tasks || [];
+    renderAiSuggestions();
+    setStatus('aiStatus', aiSuggestions.length ? '' : 'The AI returned no tasks. Try a more specific prompt.');
+  } catch (e) {
+    setStatus('aiStatus', e.message, true);
+  }
+  $('aiRun').disabled = false;
+}
+
+function renderAiSuggestions() {
+  const box = $('aiList');
+  if (!aiSuggestions.length) {
+    box.innerHTML = '<div class="none-msg">No suggestions returned. Try being more specific.</div>';
+    return;
+  }
+  box.innerHTML = aiSuggestions.map((s, i) => `
+    <div class="ai-item">
+      <div class="ai-item-title">${esc(s.title)}</div>
+      ${s.outcome ? `<div class="ai-item-sub">${esc(s.outcome)}</div>` : ''}
+      <div class="ai-item-meta">
+        ${s.priority ? `<span class="tag">${esc(s.priority)}</span>` : ''}
+        ${s.due ? `<span class="tag">due ${esc(s.due)}</span>` : ''}
+        ${s.hours ? `<span class="tag">${esc(s.hours)}</span>` : ''}
+      </div>
+      <button class="primary small" data-ai-add="${i}" type="button">＋ Add to board</button>
+    </div>`).join('') + '<div class="none-msg">Suggestions only land on the board when you add them.</div>';
+}
+
+async function addAiSuggestion(i) {
+  const s = aiSuggestions[i];
+  if (!s) return;
+  try {
+    await api('/api/tasks', { method: 'POST', body: {
+      title: s.title,
+      outcome: s.outcome || '',
+      priority: s.priority || 'Medium',
+      due: s.due || '',
+      hours: s.hours || '0h',
+      assignee: '',
+      tags: [],
+      customValues: {},
+      column_id: sprintTargetCol(),
+    }});
+    toast('Task added to the current sprint');
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function runAiSummary() {
+  setStatus('aiSumStatus', 'Summarizing…', false);
+  $('aiSumRun').disabled = true;
+  $('aiOut').innerHTML = '';
+  try {
+    const d = await api('/api/ai', { method: 'POST', body: { mode: 'summary' } });
+    $('aiOut').innerHTML = '<div class="ai-sum-box">' + esc(d.summary).replace(/\n/g, '<br>') + '</div>';
+    setStatus('aiSumStatus', '');
+  } catch (e) {
+    setStatus('aiSumStatus', e.message, true);
+  }
+  $('aiSumRun').disabled = false;
 }
 
 /* ---------- column modal ---------- */
@@ -1684,6 +1865,41 @@ function bindEvents() {
   $('mSave').onclick = saveTask;
   $('mDelete').onclick = deleteTask;
   $('mCancel').onclick = () => closeModal('taskModal');
+  $('mCommentAdd').onclick = addComment;
+  $('mComment').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addComment(); } };
+  $('mAttachAdd').onclick = uploadAttachment;
+  $('mAttachFile').onchange = uploadAttachment;
+  $('mComments').onclick = (e) => {
+    const b = e.target.closest('[data-del-com]');
+    if (b) deleteCommentById(Number(b.dataset.delCom));
+  };
+  $('mAttachments').onclick = (e) => {
+    const b = e.target.closest('[data-del-att]');
+    if (b) deleteAttachmentById(Number(b.dataset.delAtt));
+  };
+
+  $('btnAI').onclick = () => { openModal('aiModal'); };
+  $('aiClose').onclick = () => closeModal('aiModal');
+  $('aiTabGen').onclick = () => {
+    $('aiPanelGen').hidden = false;
+    $('aiPanelSum').hidden = true;
+    $('aiTabGen').className = 'primary';
+    $('aiTabSum').className = 'secondary';
+    setStatus('aiSumStatus', '');
+  };
+  $('aiTabSum').onclick = () => {
+    $('aiPanelGen').hidden = true;
+    $('aiPanelSum').hidden = false;
+    $('aiTabGen').className = 'secondary';
+    $('aiTabSum').className = 'primary';
+    setStatus('aiStatus', '');
+  };
+  $('aiRun').onclick = runAiGenerate;
+  $('aiSumRun').onclick = runAiSummary;
+  $('aiList').onclick = (e) => {
+    const btn = e.target.closest('[data-ai-add]');
+    if (btn) addAiSuggestion(Number(btn.dataset.aiAdd));
+  };
   $('mTags').onclick = (e) => {
     const chip = e.target.closest('[data-tag]');
     if (!chip || !canEdit()) return;

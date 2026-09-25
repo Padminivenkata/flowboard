@@ -52,7 +52,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 app.set('trust proxy', 1);
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
 
 const bump = () => io.emit('board:changed');
@@ -330,7 +330,7 @@ const dailyCapOf = (m, wh) => {
 
 app.get('/api/board', auth, async (req, res, next) => {
   try {
-    const [s, c, t, g, f, m, mv] = await Promise.all([
+    const [s, c, t, g, f, m, mv, cm, at] = await Promise.all([
       getSettings(),
       db.execute('SELECT * FROM board_columns ORDER BY position, id'),
       db.execute('SELECT * FROM tasks ORDER BY position, id'),
@@ -338,6 +338,8 @@ app.get('/api/board', auth, async (req, res, next) => {
       db.execute('SELECT * FROM custom_fields ORDER BY position, id'),
       db.execute('SELECT * FROM users ORDER BY username COLLATE NOCASE'),
       db.execute('SELECT * FROM task_moves ORDER BY at, id'),
+      db.execute('SELECT * FROM task_comments ORDER BY created_at, id'),
+      db.execute('SELECT id, task_id, user_id, uploader, name, mime, size, created_at FROM task_attachments ORDER BY created_at, id'),
     ]);
 
     const columns = c.rows.map((r) => ({
@@ -407,6 +409,17 @@ app.get('/api/board', auth, async (req, res, next) => {
       customFields: f.rows.map((r) => ({
         id: Number(r.id), name: r.name, type: r.type,
         options: safeJson(r.options, []), position: Number(r.position),
+      })),
+      comments: cm.rows.map((r) => ({
+        id: Number(r.id), task_id: Number(r.task_id),
+        author: r.author || '', body: r.body, created_at: r.created_at,
+        mine: Number(r.user_id) === req.user.id,
+      })),
+      attachments: at.rows.map((r) => ({
+        id: Number(r.id), task_id: Number(r.task_id),
+        uploader: r.uploader || '', name: r.name, mime: r.mime,
+        size: Number(r.size) || 0, created_at: r.created_at,
+        mine: Number(r.user_id) === req.user.id,
       })),
       members: m.rows.map((r) => ({
         id: Number(r.id), username: r.username, role: r.role, capacity: Number(r.capacity) || 0,
@@ -568,9 +581,207 @@ app.delete('/api/tasks/:id', auth, need('editor'), async (req, res, next) => {
     const id = Number(req.params.id);
     const r = await db.execute({ sql: 'DELETE FROM tasks WHERE id = ?', args: [id] });
     if (!r.rowsAffected) return res.status(404).json({ error: 'Task not found' });
+    await db.execute({ sql: 'DELETE FROM task_comments WHERE task_id = ?', args: [id] });
+    await db.execute({ sql: 'DELETE FROM task_attachments WHERE task_id = ?', args: [id] });
     bump();
     res.json({ ok: true });
   } catch (e) { next(e); }
+});
+
+// ---------- task comments & attachments ----------
+async function taskExists(id, res) {
+  const chk = await db.execute({ sql: 'SELECT 1 FROM tasks WHERE id = ?', args: [id] });
+  if (!chk.rows.length) {
+    res.status(404).json({ error: 'Task not found' });
+    return false;
+  }
+  return true;
+}
+
+app.post('/api/tasks/:id/comments', auth, need('editor'), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await taskExists(id, res))) return;
+    const body = str(req.body?.body, 5000).trim();
+    if (!body) return res.status(400).json({ error: 'Comment is required' });
+    const r = await db.execute({
+      sql: 'INSERT INTO task_comments (task_id, user_id, author, body) VALUES (?,?,?,?)',
+      args: [id, req.user.id, req.user.username, body],
+    });
+    const row = await db.execute({ sql: 'SELECT * FROM task_comments WHERE id = ?', args: [Number(r.lastInsertRowid)] });
+    bump();
+    const c = row.rows[0];
+    res.status(201).json({
+      id: Number(c.id), task_id: Number(c.task_id), author: c.author || '',
+      body: c.body, created_at: c.created_at, mine: true,
+    });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/comments/:id', auth, need('editor'), async (req, res, next) => {
+  try {
+    const r = await db.execute({ sql: 'DELETE FROM task_comments WHERE id = ?', args: [Number(req.params.id)] });
+    if (!r.rowsAffected) return res.status(404).json({ error: 'Comment not found' });
+    bump();
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+function cleanBase64(v) {
+  const s = String(v || '');
+  const comma = s.indexOf(',');
+  return (comma >= 0 ? s.slice(comma + 1) : s).trim();
+}
+
+app.post('/api/tasks/:id/attachments', auth, need('editor'), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await taskExists(id, res))) return;
+    const name = str(req.body?.name, 150).trim();
+    if (!name) return res.status(400).json({ error: 'Attachment name is required' });
+    const mime = str(req.body?.mime, 100).trim() || 'application/octet-stream';
+    const size = Math.max(0, Math.min(MAX_ATTACHMENT_BYTES, Math.round(Number(req.body?.size) || 0)));
+    const data = cleanBase64(req.body?.data);
+    if (!data || !/^[A-Za-z0-9+/=\r\n]+$/.test(data)) return res.status(400).json({ error: 'Invalid file data' });
+    if (Math.floor(Buffer.byteLength(data, 'base64')) > MAX_ATTACHMENT_BYTES) {
+      return res.status(400).json({ error: 'Attachments must be 10 MB or smaller' });
+    }
+    const r = await db.execute({
+      sql: 'INSERT INTO task_attachments (task_id, user_id, uploader, name, mime, size, data) VALUES (?,?,?,?,?,?,?)',
+      args: [id, req.user.id, req.user.username, name, mime, size, data],
+    });
+    const row = await db.execute({
+      sql: 'SELECT id, task_id, user_id, uploader, name, mime, size, created_at FROM task_attachments WHERE id = ?',
+      args: [Number(r.lastInsertRowid)],
+    });
+    bump();
+    const a = row.rows[0];
+    res.status(201).json({
+      id: Number(a.id), task_id: Number(a.task_id), uploader: a.uploader || '',
+      name: a.name, mime: a.mime, size: Number(a.size) || 0, created_at: a.created_at, mine: true,
+    });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/tasks/:id/attachments/:attId', auth, async (req, res, next) => {
+  try {
+    const att = await db.execute({ sql: 'SELECT * FROM task_attachments WHERE id = ?', args: [Number(req.params.attId)] });
+    if (!att.rows.length) return res.status(404).json({ error: 'Attachment not found' });
+    const buf = Buffer.from(String(att.rows[0].data || ''), 'base64');
+    const filename = encodeURIComponent(String(att.rows[0].name || 'file'));
+    res.setHeader('Content-Type', att.rows[0].mime || 'application/octet-stream');
+    res.setHeader('Content-Length', buf.length);
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${filename}`);
+    res.send(buf);
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/attachments/:id', auth, need('editor'), async (req, res, next) => {
+  try {
+    const r = await db.execute({ sql: 'DELETE FROM task_attachments WHERE id = ?', args: [Number(req.params.id)] });
+    if (!r.rowsAffected) return res.status(404).json({ error: 'Attachment not found' });
+    bump();
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ---------- AI assistant ----------
+const AI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+async function openAiChat(system, userContent, jsonMode) {
+  const body = {
+    model: AI_MODEL,
+    messages: [{ role: 'system', content: system }, { role: 'user', content: userContent }],
+  };
+  if (jsonMode) body.response_format = { type: 'json_object' };
+  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`OpenAI error ${resp.status}${text ? ': ' + text.slice(0, 300) : ''}`);
+  }
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+app.post('/api/ai', auth, need('editor'), async (req, res, next) => {
+  try {
+    const key = (process.env.OPENAI_API_KEY || '').trim();
+    if (!key) {
+      return res.status(503).json({ error: 'AI is not configured yet. Ask the admin to add an OPENAI_API_KEY to enable it.' });
+    }
+    const mode = req.body?.mode;
+    const [cols, tasks, members, settings] = await Promise.all([
+      db.execute('SELECT id, name, stage FROM board_columns ORDER BY position, id'),
+      db.execute('SELECT column_id, title, assignee, department, priority, due, hours, outcome FROM tasks ORDER BY position, id'),
+      db.execute('SELECT username, role, department FROM users ORDER BY username COLLATE NOCASE'),
+      getSettings(),
+    ]);
+    const colName = new Map(cols.rows.map((r) => [Number(r.id), r.name]));
+    const doneColObj = cols.rows.find((r) => r.stage === 'done');
+    const doneColId = doneColObj ? Number(doneColObj.id) : null;
+
+    if (mode === 'generate') {
+      const instruction = str(req.body?.instruction, 2000).trim();
+      if (!instruction) return res.status(400).json({ error: 'Describe the tasks to generate' });
+      const context = JSON.stringify({
+        workspace: settings.workspace_name,
+        columns: cols.rows.map((r) => r.name),
+        priorities: settings.priorities || [],
+        members: members.rows.map((r) => ({ username: r.username, role: r.role, department: r.department || '' })),
+        tasks: tasks.rows.map((t) => ({
+          title: t.title, column: colName.get(Number(t.column_id)) || '?',
+          assignee: t.assignee || '', priority: t.priority || '', due: t.due || '', hours: t.hours || '',
+        })),
+      });
+      const system = 'You plan practical project tasks. Reply with only JSON: {"tasks":[{"title":"...","outcome":"optional description","priority":"High|Medium|Low","due":"YYYY-MM-DD or empty","hours":"0h-8h or empty"}]}. Return 1 to 8 tasks with titles this team would recognize. Omit optional fields. No markdown.';
+      const raw = await openAiChat(system, JSON.stringify({ instruction, context }), true);
+      const parsed = safeJson(raw, null);
+      const list = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+      const generated = list.slice(0, 8).map((t) => ({
+        title: str(t?.title, 300).trim(),
+        outcome: str(t?.outcome, 3000).trim(),
+        priority: str(t?.priority, 20).trim() || 'Medium',
+        due: String(t?.due || '').match(/^\d{4}-\d{2}-\d{2}$/) ? String(t.due) : '',
+        hours: /^[0-9]+(?:\.[0-9]+)?h?$/.test(String(t?.hours || '')) ? String(t.hours).trim() : '',
+      })).filter((t) => t.title);
+      return res.json({ tasks: generated });
+    }
+
+    if (mode === 'summary') {
+      const doneCount = doneColId ? tasks.rows.filter((t) => Number(t.column_id) === doneColId).length : 0;
+      const openCount = tasks.rows.length - doneCount;
+      const overdue = tasks.rows.filter((t) =>
+        t.due && t.due < dateKey(new Date()) && !(doneColId && Number(t.column_id) === doneColId));
+      const hoursTotal = tasks.rows.reduce((s2, t) => s2 + hoursInt(t.hours), 0);
+      const context = JSON.stringify({
+        workspace: settings.workspace_name,
+        columns: cols.rows.map((r) => r.name),
+        taskCount: tasks.rows.length,
+        doneCount,
+        openCount,
+        totalHours: Math.round(hoursTotal * 10) / 10,
+        overdue: overdue.map((t) => t.title),
+        tasks: tasks.rows.map((t) => ({
+          title: t.title, column: colName.get(Number(t.column_id)) || '?',
+          assignee: t.assignee || '', priority: t.priority || '', due: t.due || '', hours: t.hours || '',
+        })),
+      });
+      const system = 'You are a project delivery assistant. Summarize this board concisely for the team using the provided context only. Use markdown headings and bullets. Cover: current state, risks/overdue items, what is in flight, and 3-5 clear next actions. Do not invent facts.';
+      const raw = await openAiChat(system, context, false);
+      return res.json({ summary: raw.trim() });
+    }
+
+    return res.status(400).json({ error: 'Invalid AI mode' });
+  } catch (e) {
+    if (/OpenAI error/.test(String(e.message))) return res.status(502).json({ error: e.message });
+    next(e);
+  }
 });
 
 // ---------- columns ----------

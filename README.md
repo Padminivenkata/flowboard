@@ -23,6 +23,9 @@ Every change is broadcast live over WebSockets, so all open browsers update at o
 - Custom fields — per-task fields of type Text / Number / Date / Select, shown on cards
 - Board settings — workspace name, board title, sprint label + dates, departments, priorities, start/end sprint
 - Members — admin assigns viewer/editor/admin roles
+- Task comments — discuss any task (realtime, delete anywhere with edit rights)
+- Task attachments — upload/download files (up to 10 MB each), counted on cards
+- AI assistant — generate task suggestions from a plain-English prompt, or get a concise board summary (needs `OPENAI_API_KEY`; otherwise shows a friendly "not configured" message)
 
 ## Run locally
 
@@ -45,6 +48,7 @@ Every user just opens the website URL in their browser and signs in. The board a
 3. Settings: Build command `npm install`, Start command `node server.js`.
 4. Under **Environment**, add:
    - `JWT_SECRET` — a long random string (e.g. `openssl rand -hex 32`)
+   - `OPENAI_API_KEY` — optional, enables the AI assistant (`✦ AI Assistant` button)
 5. Deploy. Render gives you a public URL like `https://your-app.onrender.com` — share it with your team.
 
 > Render's free tier has a **temporary** disk, so the SQLite file resets on redeploys/restarts. To keep data permanently, add a free Turso cloud database below.
@@ -75,6 +79,9 @@ flowboard/
 - `POST /api/auth/register|login|logout`, `GET /api/me`
 - `GET /api/board` — whole board state for the signed-in user
 - `POST /api/tasks`, `PATCH /api/tasks/:id` (fields + `column_id` + `beforeTaskId` for ordering), `DELETE /api/tasks/:id`
+- `POST /api/tasks/:id/comments`, `DELETE /api/comments/:id`
+- `POST /api/tasks/:id/attachments`, `GET /api/tasks/:id/attachments/:attId`, `DELETE /api/attachments/:id`
+- `POST /api/ai` — `{ mode: 'generate' | 'summary', instruction? }` (OpenAI)
 - `POST|PATCH|DELETE /api/board-columns[/:id|/reorder]`
 - `POST|PATCH|DELETE /api/tags`
 - `POST|DELETE /api/custom-fields`

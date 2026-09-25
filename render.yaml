@@ -9,3 +9,6 @@ services:
     envVars:
       - key: JWT_SECRET
         generateValue: true
+      # Add your OpenAI key in the Render dashboard to enable the AI assistant:
+      # - key: OPENAI_API_KEY
+      #   value: sk-...
