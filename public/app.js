@@ -611,6 +611,12 @@ function nextBrowAfter(el) {
   const i = rows.indexOf(el);
   return rows[i + 1] || null;
 }
+function bkScroller(e) {
+  const c = e.target.closest('.s-tasks, .backlog-list, .sprint-panes');
+  if (c && c.scrollHeight > c.clientHeight) return c;
+  const s = document.scrollingElement;
+  return s && s.scrollHeight > s.clientHeight ? s : null;
+}
 async function unplanTask(id) {
   const left = leftmostCol();
   try {
@@ -628,7 +634,7 @@ async function paneSprintAction(id) {
     try {
       await api(`/api/sprints/${sp.id}`, { method: 'PATCH', body: { status: 'active' } });
       await api(`/api/sprints/${sp.id}`, { method: 'PATCH', body: { select: true } });
-      toast('Sprint started — it is now the current sprint');
+      toast('Sprint started — planned tasks moved onto the board');
       await loadBoard();
     } catch (e) { toast(e.message, true); }
   }
@@ -663,18 +669,29 @@ function bindBacklog() {
     if (bkDragId == null) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    const sc = bkScroller(e);
+    if (sc) {
+      const zr = sc.getBoundingClientRect();
+      const gap = 42;
+      const distT = e.clientY - zr.top;
+      const distB = zr.bottom - e.clientY;
+      if (distT < gap) sc.scrollTop -= Math.round(16 * (1 - distT / gap));
+      else if (distB < gap) sc.scrollTop += Math.round(16 * (1 - distB / gap));
+    }
     document.querySelectorAll('#backlogArea .bk-before,#backlogArea .bk-after,#backlogArea .bk-in').forEach((el) => el.classList.remove('bk-before', 'bk-after', 'bk-in'));
     const row = e.target.closest('.brow');
     if (row && Number(row.dataset.id) !== bkDragId) {
       const r = row.getBoundingClientRect();
+      const pane = row.closest('.s-pane');
       const isBack = row.closest('.s-tasks') ? false : !!(row.closest('.backlog-list'));
-      if (e.clientY - r.top < r.height / 2) {
+      const spr = pane ? Number(pane.dataset.sprint) : undefined;
+      if (e.clientY - r.top < r.height * 0.4) {
         row.classList.add('bk-before');
-        bkDrop = { beforeId: Number(row.dataset.id), isBack };
+        bkDrop = { beforeId: Number(row.dataset.id), isBack, sprintId: spr };
       } else {
         const nx = nextBrowAfter(row);
-        if (nx && Number(nx.dataset.id) !== bkDragId) { nx.classList.add('bk-before'); bkDrop = { beforeId: Number(nx.dataset.id), isBack }; }
-        else { row.classList.add('bk-after'); bkDrop = { beforeId: null, isBack }; }
+        if (nx && Number(nx.dataset.id) !== bkDragId) { nx.classList.add('bk-before'); bkDrop = { beforeId: Number(nx.dataset.id), isBack, sprintId: spr }; }
+        else { row.classList.add('bk-after'); bkDrop = { beforeId: null, isBack, sprintId: spr }; }
       }
       return;
     }
@@ -703,7 +720,7 @@ function bindBacklog() {
     if (!d) return;
     const t = board.tasks.find((x) => x.id === id);
     if (!t) return;
-    const sprintId = d.isBack ? 0 : (d.sprintId || 0);
+    const sprintId = d.isBack ? 0 : (d.sprintId !== undefined ? d.sprintId : t.sprint_id || 0);
     let colId = t.column_id;
     if (d.isBack) { const left = leftmostCol(); if (left) colId = left.id; }
     try {
@@ -1911,12 +1928,22 @@ function defaultSprintDates() {
   return { start: dayKey(mon), end: dayKey(addDays(mon, 4)) };
 }
 
+function nextSprintName() {
+  const sprints = board.settings.sprints || [];
+  let max = 0;
+  for (const s of sprints) {
+    const m = /^Sprint[ _-]?(\d+)$/i.exec(String(s.name || '').trim());
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max > 0 ? `Sprint ${max + 1}` : `Sprint ${sprints.length + 1}`;
+}
+
 function openSprintModal(sp) {
   if (!canEdit()) return;
   editingSprintId = sp ? sp.id : null;
   $('sprintModalTitle').textContent = sp ? 'Edit Sprint' : 'New Sprint';
   $('spDelete').hidden = !sp || sp.status === 'complete';
-  $('spName').value = sp ? sp.name : '';
+  $('spName').value = sp ? sp.name : nextSprintName();
   const dts = sp ? { start: sp.start, end: sp.end } : defaultSprintDates();
   $('spStart').value = dts.start;
   $('spEnd').value = dts.end;
@@ -1926,8 +1953,9 @@ function openSprintModal(sp) {
 
 async function saveSprint() {
   const name = $('spName').value.trim();
-  if (!name) { toast('Sprint name is required', true); return; }
-  const body = { name, start_date: $('spStart').value, end_date: $('spEnd').value };
+  if (editingSprintId != null && !name) { toast('Sprint name is required', true); return; }
+  const body = { start_date: $('spStart').value, end_date: $('spEnd').value };
+  if (name) body.name = name;
   try {
     if (editingSprintId != null) {
       await api(`/api/sprints/${editingSprintId}`, { method: 'PATCH', body });
