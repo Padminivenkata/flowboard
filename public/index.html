@@ -91,7 +91,37 @@
       <div class="capacity-list" id="capacityList"></div>
     </div>
 
-    <section class="board"><div class="columns" id="columns"></div></section>
+    <section class="board" id="boardArea">
+      <div class="scope-bar" id="scopeBar" hidden>
+        <span id="scopeLabel"></span>
+        <button class="secondary small" id="btnScopeAll" type="button">Show all sprints</button>
+      </div>
+      <div class="columns" id="columns"></div>
+    </section>
+
+    <section class="board" id="backlogArea" hidden>
+      <div class="backlog-layout">
+        <div class="backlog-pane">
+          <div class="backlog-pane-head">
+            <h2 class="backlog-h">Backlog<span class="bl-sub">tasks not yet assigned to a sprint</span><span class="backlog-count" id="backCount"></span></h2>
+            <div class="backlog-actions">
+              <button class="secondary" id="btnBackToSprint" type="button">⤴ Move all to current sprint</button>
+              <button class="primary" id="btnBackTask" type="button">＋ New Task</button>
+            </div>
+          </div>
+          <div class="backlog-list" id="backList" data-list="back"></div>
+        </div>
+        <div class="sprints-pane">
+          <div class="backlog-pane-head">
+            <h2 class="backlog-h">Sprints<span class="bl-sub">drag tasks in to plan, drag out or ✕ to un-plan</span></h2>
+            <div class="backlog-actions">
+              <button class="primary" id="btnBackSprint" type="button">＋ Create sprint</button>
+            </div>
+          </div>
+          <div class="sprint-panes" id="backSprints"></div>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 

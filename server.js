@@ -450,7 +450,9 @@ app.post('/api/tasks', auth, need('editor'), async (req, res, next) => {
     }
     const mx = await db.execute({ sql: 'SELECT COALESCE(MAX(position), -1) m FROM tasks WHERE column_id = ?', args: [colId] });
     const leftmost = (await db.execute('SELECT id FROM board_columns ORDER BY position, id LIMIT 1')).rows[0];
-    const sprintId = (leftmost && Number(leftmost.id) === colId) ? 0 : await activeSprintId();
+    const sprintId = b.sprint_id !== undefined
+      ? Math.max(0, Math.round(Number(b.sprint_id) || 0))
+      : ((leftmost && Number(leftmost.id) === colId) ? 0 : await activeSprintId());
     const r = await db.execute({
       sql: `INSERT INTO tasks (column_id, title, assignee, department, priority, due, hours, outcome, acceptance, tags, custom_values, position, recur, logged_minutes, sprint_id)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -534,7 +536,10 @@ app.patch('/api/tasks/:id', auth, need('editor'), async (req, res, next) => {
       const leftmost = (await db.execute('SELECT id FROM board_columns ORDER BY position, id LIMIT 1')).rows[0];
       const leftId = leftmost ? Number(leftmost.id) : null;
       let sprintId = Number(task.sprint_id) || 0;
-      if (leftId != null) {
+      const explicitSprint = b.sprint_id !== undefined;
+      if (explicitSprint) {
+        sprintId = Math.max(0, Math.round(Number(b.sprint_id) || 0));
+      } else if (leftId != null) {
         if (targetCol === leftId) sprintId = 0;
         else if (targetCol !== Number(task.column_id)) sprintId = await activeSprintId();
       }
@@ -1084,6 +1089,22 @@ app.patch('/api/sprints/:id', auth, need('editor'), async (req, res, next) => {
         if (status === 'active') {
           await db.execute("UPDATE sprints SET status = 'future' WHERE status = 'active'");
           sets.push("status = 'active'");
+          const left = (await db.execute('SELECT id FROM board_columns ORDER BY position, id LIMIT 1')).rows[0];
+          if (left) {
+            const target = (await db.execute({ sql: 'SELECT id FROM board_columns WHERE id != ? ORDER BY position, id LIMIT 1', args: [Number(left.id)] })).rows[0];
+            if (target) {
+              await db.execute({
+                sql: "INSERT INTO task_moves (task_id, column_id, at) SELECT id, ?, strftime('%s','now') FROM tasks WHERE sprint_id = ? AND column_id = ?",
+                args: [Number(target.id), id, Number(left.id)],
+              });
+              await db.execute({
+                sql: 'UPDATE tasks SET column_id = ? WHERE sprint_id = ? AND column_id = ?',
+                args: [Number(target.id), id, Number(left.id)],
+              });
+              await renumber(Number(left.id));
+              await renumber(Number(target.id));
+            }
+          }
         } else if (String(cur.status) === 'active') {
           return res.status(400).json({ error: 'End the current sprint before changing its status' });
         } else {

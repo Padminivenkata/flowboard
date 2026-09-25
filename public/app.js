@@ -18,6 +18,9 @@ let draftPris = [];
 let redrawSettingsLists = null;
 let authMode = 'login';
 let editingSprintId = null;
+let newTaskSprintId = null;
+let bkDragId = null;
+let bkDrop = null;
 
 /* ---------- helpers ---------- */
 function esc(s) {
@@ -262,27 +265,13 @@ function cardHtml(t) {
 
 function renderColumns() {
   if (!board) return;
-  const list = filteredTasks();
+  if (backlogMode) { renderBacklog(); return; }
+  const sc = boardScope();
+  let list = filteredTasks();
+  if (sc !== 'all') list = list.filter((t) => t.sprint_id === sc);
+  updateScopeBar(list.length);
   $('total').textContent = list.length;
   const edit = canEdit();
-  if (backlogMode) {
-    const blk = leftmostCol();
-    const arr = list.filter((t) => t.column_id === blk.id);
-    $('columns').innerHTML = `<div class="backlog-title">Backlog<span>new tasks land here until you move them to the Task Board</span></div>
-      <div class="backlog-bar">Click a card's <b>⋮</b> → <b>Move to Task Board</b> and it goes to your <i>To Do</i> column — same task, nothing duplicated, full history kept.</div>
-      <div class="column backlog-col" data-col="${blk.id}">
-        <div class="col-head">
-          <span class="dot" style="background:${esc(blk.color)}"></span>
-          <span class="col-name">${esc(blk.name)}</span>
-          <span class="count">${arr.length}</span>
-          ${edit ? `<button class="col-edit" data-act="col-menu" data-col="${blk.id}" title="Edit column: name / colour / position">✎</button>` : ''}
-          ${edit ? `<button class="col-edit" data-act="sprint-all" title="Move all to current sprint">⤴ Move all</button>` : ''}
-        </div>
-        <div class="cards">${arr.length ? arr.map(cardHtml).join('') : '<div class="empty">Backlog is empty — create a task with ＋ New Task</div>'}</div>
-        ${edit ? `<button class="add" data-act="add-card" data-col="${blk.id}">＋ New Task</button>` : ''}
-      </div>`;
-    return;
-  }
   const flow = board.columns.slice().sort((a, b) => a.position - b.position);
   if (leftmostCol()) flow.shift();
   let html = flow.map((col) => {
@@ -464,12 +453,267 @@ async function moveAllToSprint() {
   await loadBoard();
 }
 
-function toggleBacklog() {
-  backlogMode = !backlogMode;
+function setView(mode) {
+  backlogMode = mode === 'backlog';
   $('navBoard').classList.toggle('active', !backlogMode);
   $('navBacklog').classList.toggle('active', backlogMode);
   $('sidebar').classList.remove('open');
+  $('boardArea').hidden = backlogMode;
+  $('backlogArea').hidden = !backlogMode;
   renderColumns();
+}
+
+/* ---------- board sprint scope ---------- */
+function boardScope() {
+  const v = $('sprintSelect').value;
+  if (v === 'all') return 'all';
+  const n = Number(v) || 0;
+  return (board.settings.sprints || []).some((s2) => s2.id === n) ? n : 'all';
+}
+function sprintById(id) {
+  return (board.settings.sprints || []).find((s) => s.id === id) || null;
+}
+function updateScopeBar(count) {
+  const bar = $('scopeBar');
+  if (backlogMode || !canEdit()) { bar.hidden = true; return; }
+  const sc = boardScope();
+  const sp = sc === 'all' ? null : sprintById(sc);
+  if (!sp || sp.status === 'complete') { bar.hidden = true; return; }
+  bar.hidden = false;
+  $('scopeLabel').innerHTML = `Board showing <b>${esc(sp.name)}</b> · ${count} task${count === 1 ? '' : 's'}`;
+  $('btnScopeAll').hidden = false;
+}
+function scopeAllSprints() {
+  $('sprintSelect').value = 'all';
+  renderColumns();
+}
+
+/* ---------- Jira-style backlog ---------- */
+function sprintTasks(id) {
+  const done = (board.columns.find((c) => c.stage === 'done') || {}).id;
+  return board.tasks.filter((t) => t.sprint_id === id && (done == null || t.column_id !== done));
+}
+function rowCounts(t) {
+  const nCom = board.comments.filter((c) => c.task_id === t.id).length;
+  const nAt = board.attachments.filter((a) => a.task_id === t.id).length;
+  if (!nCom && !nAt) return '';
+  return `<span class="b-counts" title="${nCom} comments · ${nAt} attachments">💬${nCom || ''}${nCom && nAt ? ' ' : ''}📎${nAt || ''}</span>`;
+}
+function prioTri(p) {
+  const q = String(p || '').toLowerCase();
+  return q === 'high' ? '▲' : q === 'low' ? '▼' : '◆';
+}
+function backlogRowHtml(t, edit, opts = {}) {
+  const chips = [];
+  if (t.spilled) chips.push('<span class="tag spilled-chip">SPILLED</span>');
+  if (t.department) chips.push(`<span class="tag">${esc(t.department)}</span>`);
+  for (const tid of t.tags.slice(0, 2)) {
+    const g = board.tags.find((x) => x.id === tid);
+    if (g) chips.push(`<span class="tag dot-tag" style="color:${esc(g.color)};background:${esc(g.color)}1a">${esc(g.name)}</span>`);
+  }
+  const overdue = t.due && t.due < dayKey(new Date());
+  return `<div class="brow${edit ? ' sortable' : ''}" data-id="${t.id}" ${edit ? 'draggable="true"' : ''}>
+    <span class="b-prio" style="color:${esc(prioColor(t.priority))}" title="${esc(t.priority || 'No priority')}">${prioTri(t.priority)}</span>
+    <span class="b-num">#${t.id}</span>
+    <span class="b-title" title="${esc(t.title)}">${esc(t.title)}</span>
+    <span class="b-meta">${chips.join(' ')}</span>
+    <span class="b-due${overdue ? ' over' : ''}">${esc(fmtDue(t.due))}</span>
+    ${rowCounts(t)}
+    <span class="b-assign"><span class="avatar">${initials(t.assignee)}</span><span class="b-who">${esc(t.assignee || 'Unassigned')}</span></span>
+    <span class="b-act">
+      ${opts.unplan ? `<button class="dot-btn" data-act="unplan" data-id="${t.id}" type="button" title="Move back to the Backlog">✕</button>` : ''}
+      <button class="dot-btn" data-act="task-menu" data-id="${t.id}" type="button" title="Actions">⋮</button>
+    </span>
+  </div>`;
+}
+function sprintCap(sp) {
+  const members = (board.members || []).filter((m) => m.isActive);
+  let wd = 5;
+  if (sp && sp.start && sp.end) {
+    const start = new Date(sp.start + 'T00:00:00');
+    const end = new Date(sp.end + 'T00:00:00');
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+      wd = 0;
+      const curr = new Date(start);
+      const hols = new Set(board.settings.holidays || []);
+      while (curr <= end) {
+        const w = curr.getDay();
+        if (w !== 0 && w !== 6 && !hols.has(dayKey(curr))) wd++;
+        curr.setDate(curr.getDate() + 1);
+      }
+    }
+  }
+  const capacity = Math.round(members.reduce((s, m) => s + (Number(m.dailyCap) || 0), 0) * wd * 10) / 10;
+  const planned = Math.round(sprintTasks(sp.id).reduce((s, t) => s + hoursOf(t), 0) * 10) / 10;
+  const pct = capacity > 0 ? Math.round((planned / capacity) * 100) : (planned ? 100 : 0);
+  const cls = pct >= 100 ? 'over' : pct >= 80 ? 'warn' : 'ok';
+  return { planned, capacity, pct, cls };
+}
+function capBarHtml(sp) {
+  const c = sprintCap(sp);
+  if (c.capacity <= 0) return '<div class="s-cap dim">No team capacity set — add daily capacity in Employees</div>';
+  return `<div class="s-cap">
+    <div class="s-cap-nums"><span>${fmtFull(c.planned)} planned</span><span class="s-cap-max">${fmtFull(c.capacity)} capacity</span><span class="s-cap-pct ${c.cls}">${c.pct}%</span></div>
+    <div class="cap-bar"><i style="width:${Math.min(100, c.pct)}%" class="${c.cls}"></i></div>
+    <div class="s-cap-note ${c.cls}">${c.pct >= 100 ? 'Team is over capacity' : c.pct >= 80 ? 'Nearly full — package carefully' : 'Plenty of room'}</div>
+  </div>`;
+}
+function sprintPaneHtml(sp, edit) {
+  const tasks = sprintTasks(sp.id);
+  const dates = sp.start && sp.end
+    ? `<span class="s-dates">${esc(sp.start)} → ${esc(sp.end)}</span>`
+    : '<span class="s-dates dim">no dates set</span>';
+  const chip = sp.status === 'active'
+    ? '<span class="s-chip live">● Active</span>'
+    : '<span class="s-chip">Planned</span>';
+  return `<div class="s-pane${sp.status === 'active' ? ' active' : ''}" data-sprint="${sp.id}">
+    <div class="s-head">
+      <div class="s-title">${chip}<span class="s-name">${esc(sp.name)}</span>${dates}<span class="s-count">${tasks.length} task${tasks.length === 1 ? '' : 's'}</span></div>
+      <div class="s-actions">
+        ${edit ? `<button class="secondary small" data-act="sprint-add-task" data-sprint="${sp.id}" type="button">＋ Task</button>` : ''}
+        ${edit ? `<button class="secondary small" data-act="sprint-edit" data-sprint="${sp.id}" type="button">✎</button>` : ''}
+        <button class="primary small" data-act="sprint-go" data-sprint="${sp.id}" type="button">${sp.status === 'active' ? 'End sprint' : 'Start sprint'}</button>
+      </div>
+    </div>
+    ${capBarHtml(sp)}
+    <div class="s-tasks" data-sprint="${sp.id}">
+      ${tasks.length ? tasks.map((t) => backlogRowHtml(t, edit, { unplan: true })).join('') : '<div class="s-empty">Drop tasks here to plan them</div>'}
+    </div>
+  </div>`;
+}
+function renderBacklog() {
+  if (!board) return;
+  const edit = canEdit();
+  const list = filteredTasks().filter((t) => t.sprint_id === 0)
+    .sort((a, b) => a.position - b.position);
+  const panels = (board.settings.sprints || []).filter((s) => s.status !== 'complete')
+    .sort((a, b) => (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1) || (b.id - a.id));
+  $('backCount').textContent = `${list.length} unscheduled`;
+  $('backList').innerHTML = list.length
+    ? list.map((t) => backlogRowHtml(t, edit)).join('')
+    : '<div class="b-empty">Backlog is empty — create a task, or drag one here from a sprint to un-plan it.</div>';
+  $('backSprints').innerHTML = panels.length
+    ? panels.map((s) => sprintPaneHtml(s, edit)).join('')
+    : '<div class="s-empty naked">No sprints yet — click <b>＋ Create sprint</b> to start planning.</div>';
+  $('btnBackTask').hidden = !edit;
+  $('btnBackToSprint').hidden = !edit;
+  $('btnBackSprint').hidden = !edit;
+}
+
+/* ---------- backlog drag & drop ---------- */
+function clearBkDnD() {
+  bkDrop = null;
+  document.querySelectorAll('#backlogArea .bk-before,#backlogArea .bk-after,#backlogArea .bk-in').forEach((el) => el.classList.remove('bk-before', 'bk-after', 'bk-in'));
+  document.querySelectorAll('#backlogArea .brow.bdrag').forEach((el) => el.classList.remove('bdrag'));
+}
+function nextBrowAfter(el) {
+  const rows = [...el.parentElement.querySelectorAll('.brow')];
+  const i = rows.indexOf(el);
+  return rows[i + 1] || null;
+}
+async function unplanTask(id) {
+  const left = leftmostCol();
+  try {
+    await api(`/api/tasks/${id}`, { method: 'PATCH', body: { column_id: left ? left.id : 0, sprint_id: 0 } });
+    toast('Moved the task back to the Backlog');
+    await loadBoard();
+  } catch (e) { toast(e.message, true); }
+}
+async function paneSprintAction(id) {
+  if (!canEdit()) return;
+  const sp = sprintById(id);
+  if (!sp) return;
+  if (sp.status === 'active') { openEndSprint(sp); return; }
+  if (sp.status === 'future') {
+    try {
+      await api(`/api/sprints/${sp.id}`, { method: 'PATCH', body: { status: 'active' } });
+      await api(`/api/sprints/${sp.id}`, { method: 'PATCH', body: { select: true } });
+      toast('Sprint started — it is now the current sprint');
+      await loadBoard();
+    } catch (e) { toast(e.message, true); }
+  }
+}
+function bindBacklog() {
+  const root = $('backlogArea');
+  root.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-act]');
+    if (act) {
+      const k = act.dataset.act;
+      if (k === 'task-menu') { e.stopPropagation(); openTaskMenu(act); return; }
+      if (k === 'unplan') { e.stopPropagation(); unplanTask(Number(act.dataset.id)); return; }
+      if (k === 'sprint-add-task') { e.stopPropagation(); openTaskNew(null, Number(act.dataset.sprint)); return; }
+      if (k === 'sprint-edit') { e.stopPropagation(); openSprintModal(sprintById(Number(act.dataset.sprint))); return; }
+      if (k === 'sprint-go') { e.stopPropagation(); paneSprintAction(Number(act.dataset.sprint)); return; }
+      return;
+    }
+    const row = e.target.closest('.brow');
+    if (row) openTaskView(Number(row.dataset.id));
+  });
+  root.addEventListener('dragstart', (e) => {
+    if (!canEdit()) { e.preventDefault(); return; }
+    const row = e.target.closest('.brow');
+    if (!row) { e.preventDefault(); return; }
+    bkDragId = Number(row.dataset.id);
+    e.dataTransfer.setData('text/plain', 'bk:' + bkDragId);
+    e.dataTransfer.effectAllowed = 'move';
+    row.classList.add('bdrag');
+  });
+  root.addEventListener('dragend', () => { bkDragId = null; clearBkDnD(); });
+  root.addEventListener('dragover', (e) => {
+    if (bkDragId == null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    document.querySelectorAll('#backlogArea .bk-before,#backlogArea .bk-after,#backlogArea .bk-in').forEach((el) => el.classList.remove('bk-before', 'bk-after', 'bk-in'));
+    const row = e.target.closest('.brow');
+    if (row && Number(row.dataset.id) !== bkDragId) {
+      const r = row.getBoundingClientRect();
+      const isBack = row.closest('.s-tasks') ? false : !!(row.closest('.backlog-list'));
+      if (e.clientY - r.top < r.height / 2) {
+        row.classList.add('bk-before');
+        bkDrop = { beforeId: Number(row.dataset.id), isBack };
+      } else {
+        const nx = nextBrowAfter(row);
+        if (nx && Number(nx.dataset.id) !== bkDragId) { nx.classList.add('bk-before'); bkDrop = { beforeId: Number(nx.dataset.id), isBack }; }
+        else { row.classList.add('bk-after'); bkDrop = { beforeId: null, isBack }; }
+      }
+      return;
+    }
+    const listEl = e.target.closest('.s-tasks, .backlog-list');
+    if (listEl) {
+      listEl.classList.add('bk-in');
+      bkDrop = listEl.classList.contains('backlog-list')
+        ? { beforeId: null, isBack: true }
+        : { beforeId: null, sprintId: Number(listEl.dataset.sprint), isBack: false };
+      return;
+    }
+    const pane = e.target.closest('.s-pane');
+    if (pane && pane.dataset.sprint) {
+      const tl = pane.querySelector('.s-tasks');
+      if (tl) tl.classList.add('bk-in');
+      bkDrop = { beforeId: null, sprintId: Number(pane.dataset.sprint), isBack: false };
+    }
+  });
+  root.addEventListener('drop', async (e) => {
+    if (bkDragId == null) return;
+    e.preventDefault();
+    const id = bkDragId;
+    const d = bkDrop;
+    bkDragId = null;
+    clearBkDnD();
+    if (!d) return;
+    const t = board.tasks.find((x) => x.id === id);
+    if (!t) return;
+    const sprintId = d.isBack ? 0 : (d.sprintId || 0);
+    let colId = t.column_id;
+    if (d.isBack) { const left = leftmostCol(); if (left) colId = left.id; }
+    try {
+      const body = { column_id: colId, sprint_id: sprintId };
+      if (d.beforeId) body.beforeTaskId = d.beforeId;
+      await api(`/api/tasks/${id}`, { method: 'PATCH', body });
+      toast(sprintId ? 'Added to sprint' : 'Backlog reordered');
+      await loadBoard();
+    } catch (err) { toast(err.message, true); }
+  });
 }
 
 function closeTaskMenu() {
@@ -566,11 +810,12 @@ function setTaskFormDisabled(disabled) {
   $('taskModal').querySelectorAll('.form input, .form select, .form textarea').forEach((el) => { el.disabled = disabled; });
 }
 
-function openTaskNew(colId) {
+function openTaskNew(colId, sprintId) {
   if (!canEdit()) return;
   if (!board.columns.length) { toast('Create a column first', true); return; }
   editingTaskId = null;
-  targetColumnId = colId || board.columns[0].id;
+  newTaskSprintId = sprintId || null;
+  targetColumnId = colId || (leftmostCol() ? leftmostCol().id : board.columns[0].id);
   $('taskModalTitle').textContent = 'Add Task';
   $('mCycle').hidden = true;
   delete $('mCycle').dataset.live;
@@ -600,6 +845,7 @@ function openTaskView(id) {
   if (!t) return;
   editingTaskId = id;
   targetColumnId = t.column_id;
+  newTaskSprintId = null;
   $('taskModalTitle').textContent = 'Edit Task';
   const cyc = $('mCycle');
   delete cyc.dataset.live;
@@ -678,6 +924,7 @@ async function saveTask() {
       await api(`/api/tasks/${editingTaskId}`, { method: 'PATCH', body });
     } else {
       body.column_id = targetColumnId;
+      if (newTaskSprintId != null) body.sprint_id = newTaskSprintId;
       await api('/api/tasks', { method: 'POST', body });
     }
     closeModal('taskModal');
@@ -1623,25 +1870,33 @@ function applyActive(id) {
 function renderSprintControl() {
   const sprints = board.settings.sprints || [];
   const active = Number(board.settings.active_sprint_id) || 0;
-  let cur = Number($('sprintSelect').value) || 0;
-  if (!sprints.some((s2) => s2.id === cur)) {
-    const pick = sprints.find((s2) => s2.id === active)
-      || sprints.find((s2) => s2.status !== 'complete')
-      || sprints[0];
-    cur = pick ? pick.id : 0;
+  const hasActive = sprints.some((s2) => s2.id === active && s2.status === 'active');
+  const sel = $('sprintSelect').value;
+  let wantedAll = sel === 'all';
+  let wantedId = Number(sel) || 0;
+  if (!sprints.length) {
+    $('sprintSelect').innerHTML = '<option value="0">No sprint yet</option>';
+    wantedAll = false;
+    wantedId = 0;
+  } else {
+    if (wantedAll) { /* keep */ }
+    else if (sprints.some((s2) => s2.id === wantedId)) { /* keep */ }
+    else if (hasActive) { wantedId = active; wantedAll = false; }
+    else { wantedAll = true; wantedId = 0; }
+    $('sprintSelect').innerHTML = `<option value="all"${wantedAll ? ' selected' : ''}>All sprints</option>`
+      + sprints.map((s2) => `<option value="${s2.id}"${!wantedAll && s2.id === wantedId ? ' selected' : ''}>${esc(s2.name)}${s2.status === 'complete' ? ' ✓' : s2.status === 'active' ? ' ●' : ''}</option>`).join('');
   }
-  $('sprintSelect').innerHTML = sprints.length
-    ? sprints.map((s2) => `<option value="${s2.id}"${s2.id === cur ? ' selected' : ''}>${esc(s2.name)}${s2.status === 'complete' ? ' ✓' : s2.status === 'active' ? ' ●' : ''}</option>`).join('')
-    : '<option value="0">No sprint yet</option>';
-  const sp = sprints.find((s2) => s2.id === cur) || null;
   const btn = $('btnSprint');
-  btn.textContent = !sp ? 'New Sprint'
-    : sp.status === 'active' ? 'End Sprint'
-    : sp.status === 'complete' ? 'New Sprint'
+  const actSprint = sprints.find((s2) => s2.id === active)
+    || sprints.find((s2) => s2.status !== 'complete')
+    || sprints[0] || null;
+  btn.textContent = !actSprint ? 'New Sprint'
+    : actSprint.status === 'active' ? 'End Sprint'
+    : actSprint.status === 'complete' ? 'New Sprint'
     : 'Start Sprint';
   btn.disabled = false;
-  $('btnSprintEdit').hidden = !canEdit() || !sp || !!$('btnNewSprint').hidden;
-  if (!$('btnNewSprint').hidden && !active && sp) applyActive(sp.id);
+  $('btnSprintEdit').hidden = !canEdit() || !actSprint || !!$('btnNewSprint').hidden;
+  if (!$('btnNewSprint').hidden && !active && actSprint) applyActive(actSprint.id);
 }
 
 function selectSprint(id) {
@@ -1816,8 +2071,13 @@ function bindEvents() {
   $('authForm').onsubmit = handleAuth;
   $('logoutBtn').onclick = logout;
   $('menuToggle').onclick = () => $('sidebar').classList.toggle('open');
-  $('navBoard').onclick = () => { backlogMode = false; $('navBoard').classList.add('active'); $('navBacklog').classList.remove('active'); $('sidebar').classList.remove('open'); renderColumns(); };
-  $('navBacklog').onclick = toggleBacklog;
+  $('navBoard').onclick = () => setView('board');
+  $('navBacklog').onclick = () => setView('backlog');
+  bindBacklog();
+  $('btnBackTask').onclick = () => openTaskNew(leftmostCol() ? leftmostCol().id : null);
+  $('btnBackToSprint').onclick = moveAllToSprint;
+  $('btnBackSprint').onclick = () => openSprintModal(null);
+  $('btnScopeAll').onclick = scopeAllSprints;
   $('navSettings').onclick = openSettings;
   $('navLabels').onclick = openLabels;
   $('navMembers').onclick = openMembers;
@@ -1840,8 +2100,10 @@ function bindEvents() {
   $('btnNewTask').onclick = () => openTaskNew(null);
   $('btnNewSprint').onclick = () => openSprintModal(null);
   $('sprintSelect').onchange = () => {
-    const v = Number($('sprintSelect').value);
-    if (v) selectSprint(v);
+    const v = $('sprintSelect').value;
+    if (v === 'all') { renderColumns(); return; }
+    const n = Number(v);
+    if (n) selectSprint(n);
   };
   $('btnSprint').onclick = sprintAction;
   $('btnSprintEdit').onclick = () => { const sp = currentSprint(); if (sp) openSprintModal(sp); };
