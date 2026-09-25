@@ -270,6 +270,52 @@ export async function initDb() {
     }
   }
 
+  const bcols = await db.execute('SELECT * FROM board_columns ORDER BY position, id');
+  const colName = (r) => String(r.name || '').trim().toLowerCase();
+  const needs = ['to do', 'in progress', 'review', 'blocked', 'done'].some((n) => !bcols.rows.some((r) => colName(r) === n));
+  const existing = bcols.rows;
+  const byName = (n) => existing.find((r) => colName(r) === n) || null;
+  if (needs) {
+    if (!byName('review')) {
+      const ins = await db.execute("INSERT INTO board_columns (name, color, position, stage) VALUES ('Review','#e0a4ff',0,'normal')");
+      existing.push({ id: Number(ins.lastInsertRowid), name: 'Review', color: '#e0a4ff', position: 0, stage: 'normal' });
+    }
+    if (!byName('blocked')) {
+      const ins = await db.execute("INSERT INTO board_columns (name, color, position, stage) VALUES ('Blocked','#ffb383',0,'normal')");
+      existing.push({ id: Number(ins.lastInsertRowid), name: 'Blocked', color: '#ffb383', position: 0, stage: 'normal' });
+    }
+    if (!byName('in progress')) {
+      const ins = await db.execute("INSERT INTO board_columns (name, color, position, stage) VALUES ('In Progress','#f2a33c',0,'start')");
+      existing.push({ id: Number(ins.lastInsertRowid), name: 'In Progress', color: '#f2a33c', position: 0, stage: 'start' });
+    }
+    if (!byName('to do')) {
+      const ins = await db.execute("INSERT INTO board_columns (name, color, position, stage) VALUES ('To Do','#3399ff',0,'normal')");
+      existing.push({ id: Number(ins.lastInsertRowid), name: 'To Do', color: '#3399ff', position: 0, stage: 'normal' });
+    }
+    if (!byName('done')) {
+      const ins = await db.execute("INSERT INTO board_columns (name, color, position, stage) VALUES ('Done','#3fb27f',0,'done')");
+      existing.push({ id: Number(ins.lastInsertRowid), name: 'Done', color: '#3fb27f', position: 0, stage: 'done' });
+    }
+    const ordered = [];
+    const push = (n) => {
+      const hit = byName(n);
+      if (hit && !ordered.includes(hit.id)) ordered.push(hit.id);
+    };
+    push('backlog');
+    push('to do');
+    push('refinement');
+    push('in progress');
+    push('review');
+    push('blocked');
+    push('done');
+    for (const r of existing) {
+      if (!ordered.includes(r.id)) ordered.push(r.id);
+    }
+    for (let i = 0; i < ordered.length; i++) {
+      await db.execute({ sql: 'UPDATE board_columns SET position = ? WHERE id = ?', args: [i, ordered[i]] });
+    }
+  }
+
   const setb = await db.execute('PRAGMA table_info(settings)');
   const hadCycleStart = setb.rows.some((r) => r.name === 'cycle_start_col');
   if (!hadCycleStart) {

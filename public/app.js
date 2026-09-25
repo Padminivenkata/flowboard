@@ -227,6 +227,8 @@ function filteredTasks() {
 }
 
 let backlogMode = false;
+let sabDept = '';
+let sabAssigneeId = null;
 const leftmostCol = () => board.columns.slice().sort((a, b) => a.position - b.position)[0];
 const cycleStartCol = () => {
   const sid = Number(board.settings.cycle_start_col) || 0;
@@ -287,32 +289,124 @@ function cardHtml(t) {
 function renderColumns() {
   if (!board) return;
   if (backlogMode) { renderBacklog(); return; }
+  renderSprintBoard();
+}
+
+/* ==================== Sprint Active Board (Department → Assignees → Workflow) ==================== */
+const SAB_STATUSES = ['To Do', 'In Progress', 'Review', 'Blocked', 'Done'];
+function sabStatusCol(name) {
+  const n = String(name || '').trim().toLowerCase();
+  return board.columns.find((c) => String(c.name || '').trim().toLowerCase() === n) || null;
+}
+function sabStatusOf(t) {
+  const col = board.columns.find((c) => c.id === t.column_id);
+  if (col) {
+    const n = String(col.name || '').trim().toLowerCase();
+    if (n === 'in progress') return 'In Progress';
+    if (n === 'review') return 'Review';
+    if (n === 'blocked') return 'Blocked';
+    if (n === 'done') return 'Done';
+  }
+  return 'To Do';
+}
+function sabScoped() {
   const sc = boardScope();
   let list = filteredTasks();
   if (sc !== 'all') list = list.filter((t) => t.sprint_id === sc);
+  if (sabDept) list = list.filter((t) => t.department === sabDept);
+  if (sabAssigneeId) list = list.filter((t) => t.assignee === sabAssigneeId);
+  return { sc, list };
+}
+function sabDepartments() {
+  return [...new Set([
+    ...(board.settings.departments || []),
+    ...(board.members || []).map((m) => m.department),
+    ...board.tasks.map((t) => t.department),
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+function sabAssignees(sc, dept) {
+  let base = filteredTasks();
+  if (sc !== 'all') base = base.filter((t) => t.sprint_id === sc);
+  if (dept) base = base.filter((t) => t.department === dept);
+  return [...new Set([
+    ...(board.members || []).map((m) => m.username),
+    ...base.map((t) => t.assignee),
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+function sabPersonCard(p, tasksInScope) {
+  const mine = tasksInScope.filter((t) => t.assignee === p);
+  const by = { 'To Do': 0, 'In Progress': 0, 'Review': 0, 'Blocked': 0, 'Done': 0 };
+  let planned = 0, consumed = 0;
+  for (const t of mine) {
+    by[sabStatusOf(t)]++;
+    planned += hoursOf(t);
+    consumed += (t.loggedMinutes || 0) / 60;
+  }
+  const dept = (board.members || []).find((m) => m.username === p)?.department || (mine[0] && mine[0].department) || '';
+  const active = sabAssigneeId === p;
+  return `<div class="asg-card${active ? ' active' : ''}" data-asg="${esc(p)}" role="button" tabindex="0" title="Click to filter the workflow to ${esc(p)}; click again to clear">
+    <div class="asg-top">
+      <span class="avatar">${initials(p)}</span>
+      <span class="asg-name">${esc(p)}</span>
+      <span class="asg-total">${mine.length} ${mine.length === 1 ? 'task' : 'tasks'}</span>
+    </div>
+    <div class="asg-dept">${esc(dept)}</div>
+    <div class="asg-metrics">
+      <span>To Do <b>${by['To Do']}</b></span>
+      <span>In Prog <b>${by['In Progress']}</b></span>
+      <span>Review <b>${by['Review']}</b></span>
+      <span>Blocked <b>${by['Blocked']}</b></span>
+      <span>Done <b>${by['Done']}</b></span>
+      <span class="asg-h">Plan ${fmtFull(planned)}</span>
+      <span class="asg-h">Used ${fmtFull(consumed)}</span>
+    </div>
+  </div>`;
+}
+function renderSprintBoard() {
+  if (!board) return;
+  const { sc, list } = sabScoped();
   updateScopeBar(list.length);
   $('total').textContent = list.length;
   const edit = canEdit();
-  const flow = board.columns.slice().sort((a, b) => a.position - b.position);
-  if (leftmostCol()) flow.shift();
-  let html = flow.map((col) => {
-    const arr = list.filter((t) => t.column_id === col.id);
-    return `<div class="column" data-col="${col.id}" ${edit ? 'draggable="true"' : ''}>
+  const sp = sc === 'all' ? null : sprintById(sc);
+  const deptOpts = '<option value="">All Departments</option>' + sabDepartments().map((d) =>
+    `<option value="${esc(d)}"${sabDept === d ? ' selected' : ''}>${esc(d)}</option>`).join('');
+  const attrTasks = (() => {
+    let b = filteredTasks();
+    if (sc !== 'all') b = b.filter((t) => t.sprint_id === sc);
+    if (sabDept) b = b.filter((t) => t.department === sabDept);
+    return b;
+  })();
+  const attrs = sabAssignees(sc, sabDept).map((p) => sabPersonCard(p, attrTasks)).join('');
+  const cols = SAB_STATUSES.map((n) => sabStatusCol(n)).filter(Boolean);
+  const work = cols.map((col) => {
+    const arr = list.filter((t) => sabStatusOf(t) === col.name);
+    const stageMark = col.stage === 'done'
+      ? '<span class="stage-mark" title="Done column — cycle time ends here" style="color:' + esc(col.color) + '">●</span>'
+      : col.stage === 'start' ? '<span class="stage-mark" title="Start column — cycle time starts here" style="color:' + esc(col.color) + '">▶</span>' : '';
+    return `<div class="column" data-col="${col.id}">
       <div class="col-head">
         <span class="dot" style="background:${esc(col.color)}"></span>
         <span class="col-name">${esc(col.name)}</span>
-        ${col.stage === 'start' ? `<span class="stage-mark" title="Start column — cycle time starts here" style="color:${esc(col.color)}">▶</span>` : ''}
-        ${col.stage === 'done' ? `<span class="stage-mark" title="Done column — cycle time ends here" style="color:${esc(col.color)}">●</span>` : ''}
+        ${stageMark}
         <span class="count">${arr.length}</span>
-        ${edit ? `<button class="col-edit" data-act="col-menu" data-col="${col.id}" title="Edit column: name / colour / position">✎</button>` : ''}
+        ${edit ? `<button class="add" data-act="add-card" data-col="${col.id}" type="button" title="Add task to ${esc(col.name)}">＋</button>` : ''}
       </div>
       <div class="cards">${arr.length ? arr.map(cardHtml).join('') : '<div class="empty">Drop tasks here</div>'}</div>
     </div>`;
   }).join('');
-  if (edit) {
-    html += `<div class="add-col-slot"><button class="add" data-act="add-col">＋ Add column</button></div>`;
-  }
-  $('columns').innerHTML = html;
+  $('columns').innerHTML = `<div class="sab-wrap">
+    <div class="sab-bar">
+      <span class="sab-title">Sprint Active Board</span>
+      <label class="sab-f">Department
+        <select id="sabDept">${deptOpts}</select>
+      </label>
+      <span class="sab-scope">${sp ? esc(sp.name) : 'All sprints'} · <b>${list.length}</b> task${list.length === 1 ? '' : 's'}</span>
+      <span class="sab-hint">Click an assignee card to focus their work · drag cards between columns</span>
+    </div>
+    <div class="sab-attrs">${attrs || '<div class="sab-empty">No assignees in this scope yet.</div>'}</div>
+    <div class="sab-work">${work}</div>
+  </div>`;
 }
 
 /* ---------- board interactions (drag & drop, clicks) ---------- */
@@ -401,19 +495,38 @@ function bindBoard() {
   });
 
   el.addEventListener('click', (e) => {
+    const asg = e.target.closest('.asg-card');
+    if (asg) {
+      const name = asg.dataset.asg;
+      sabAssigneeId = sabAssigneeId === name ? null : name;
+      renderColumns();
+      return;
+    }
     const act = e.target.closest('[data-act]');
     if (act) {
       const kind = act.dataset.act;
       if (kind === 'to-sprint') { e.stopPropagation(); moveToSprint(Number(act.closest('.card').dataset.id)); return; }
       if (kind === 'task-menu') { e.stopPropagation(); openTaskMenu(act); return; }
       if (kind === 'sprint-all') { moveAllToSprint(); return; }
-      if (kind === 'add-card') return openTaskNew(Number(act.dataset.col));
+      if (kind === 'add-card') {
+        const sc = boardScope();
+        openTaskNew(Number(act.dataset.col), sc === 'all' ? null : sc);
+        return;
+      }
       if (kind === 'col-menu') return openColumnEdit(Number(act.dataset.col));
       if (kind === 'add-col') return openColumnNew();
       return;
     }
     const card = e.target.closest('.card');
     if (card) openTaskView(Number(card.dataset.id));
+  });
+
+  el.addEventListener('change', (e) => {
+    if (e.target && e.target.id === 'sabDept') {
+      sabDept = e.target.value;
+      sabAssigneeId = null;
+      renderColumns();
+    }
   });
 }
 
@@ -853,7 +966,7 @@ function openTaskNew(colId, sprintId) {
   if (!board.columns.length) { toast('Create a column first', true); return; }
   editingTaskId = null;
   newTaskSprintId = sprintId || null;
-  targetColumnId = colId || (leftmostCol() ? leftmostCol().id : board.columns[0].id);
+  targetColumnId = colId || (sabStatusCol('To Do') ? sabStatusCol('To Do').id : (leftmostCol() ? leftmostCol().id : board.columns[0].id));
   $('taskModalTitle').textContent = 'Add Task';
   $('mCycle').hidden = true;
   delete $('mCycle').dataset.live;
@@ -2209,7 +2322,7 @@ function bindEvents() {
     await saveHolidays();
   };
   $('mDept').onchange = () => fillAssigneeList($('mDept').value);
-  $('btnNewTask').onclick = () => openTaskNew(null);
+  $('btnNewTask').onclick = () => { const sc = boardScope(); openTaskNew(null, sc === 'all' ? null : sc); };
   $('btnNewSprint').onclick = () => openSprintModal(null);
   $('sprintSelect').onchange = () => {
     const v = $('sprintSelect').value;

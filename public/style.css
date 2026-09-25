@@ -484,3 +484,31 @@ button.small{padding:6px 11px;font-size:11.5px}
 .trend-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px;min-width:0}
 .trend-bar{width:100%;max-width:30px;background:#7ac7a0;border-radius:4px 4px 0 0;min-height:2px}
 .trend-lab,.trend-meta{font-size:9.5px;color:var(--muted);white-space:nowrap}
+
+/* ============ Sprint Active Board (Department -> Assignees -> Workflow) ============ */
+.sab-wrap{display:flex;flex-direction:column;gap:14px;width:100%}
+.sab-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.sab-title{font-size:16px;font-weight:800;letter-spacing:.01em}
+.sab-f{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);font-weight:600}
+.sab-f select{border:1px solid var(--line2);border-radius:8px;padding:6px 8px;background:#fff}
+.sab-scope{font-size:12.5px;color:var(--muted)}
+.sab-scope b{color:var(--ink)}
+.sab-hint{font-size:11.5px;color:var(--muted);margin-left:auto}
+.sab-empty{color:var(--muted);font-size:12.5px;padding:10px 4px}
+.sab-attrs{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.asg-card{border:1px solid var(--card-line);border-radius:11px;background:#fff;padding:10px 12px;cursor:pointer;box-shadow:0 1px 2px #00000008;transition:border-color .12s,box-shadow .12s}
+.asg-card:hover{border-color:var(--purple-border);box-shadow:0 3px 10px #6657d81a}
+.asg-card.active{outline:2px solid var(--purple);outline-offset:-2px;border-color:var(--purple)}
+.asg-top{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.asg-name{font-weight:700;font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.asg-total{font-size:11px;font-weight:750;color:#505461;white-space:nowrap}
+.asg-dept{font-size:10.5px;color:var(--muted);margin-bottom:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.asg-metrics{display:flex;flex-wrap:wrap;gap:4px 11px;font-size:11px;color:var(--muted)}
+.asg-metrics b{color:var(--ink)}
+.asg-h b{font-variant-numeric:tabular-nums}
+.sab-work{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;align-items:start;width:100%}
+.sab-work .column{max-width:none;min-width:0}
+.sab-work .cards{min-height:130px}
+.sab-work .cards .empty{color:var(--muted);font-size:12px;text-align:center;border:1.5px dashed var(--line2);border-radius:9px;padding:14px 6px}
+@media (max-width:1200px){.sab-work{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:820px){.sab-work{grid-template-columns:repeat(2,minmax(0,1fr))}}
